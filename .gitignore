@@ -1,0 +1,43 @@
+# Gradle
+.gradle/
+build/
+!/gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+/out/
+
+# Local config
+/local.properties
+**/local.properties
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build outputs
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.log
+*.jks
+*.keystore
+
+# Native
+.externalNativeBuild
+.cxx
+
+# Kotlin
+/*.klib
+.kotlin/
+
+# Local tooling (config tracked; deps restored via npm install)
+node_modules/
+
+# Captures
+/captures
