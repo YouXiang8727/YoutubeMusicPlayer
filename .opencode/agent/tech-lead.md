@@ -1,6 +1,6 @@
 ---
-description: Tech Lead(角色 A)- 架構守門人。負責 Gradle 模組邊界、依賴版本治理、core:common / core:domain 與 CI 設定;唯一有權合併 main。跨模組改動、新增第三方庫、改 domain interface 時使用。
-mode: all
+description: Tech Lead(角色 A)- 架構守門人。負責 Gradle 模組邊界、依賴版本治理、core:common / core:domain 與 CI 設定;唯一有權合併 master,也是團隊唯一對外窗口(使用者不直接接觸 B/C/D)。跨模組改動、新增第三方庫、改 domain interface 時使用。
+mode: primary
 permission:
   edit:
     "**": ask

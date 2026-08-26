@@ -1,6 +1,6 @@
 ---
 description: Data/Media Engineer(角色 B)- 資料與播放工程師。負責 core:data(Room、遠端資料源、NewPipe 解析、Repository)與 feature/player 的 MusicService。資料層、串流解析、背景播放相關任務使用。
-mode: all
+mode: subagent
 permission:
   edit:
     "**": ask

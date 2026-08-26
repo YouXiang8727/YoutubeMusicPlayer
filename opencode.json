@@ -1,4 +1,5 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": ["docs/TEAM.md"]
+  "instructions": ["docs/TEAM.md"],
+  "default_agent": "tech-lead"
 }
