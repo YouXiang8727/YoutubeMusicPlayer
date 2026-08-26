@@ -48,8 +48,12 @@
 - `local.AppDatabase` / `PlaylistDao`：Room
 - `remote.YoutubeSearchApi`：Retrofit（行動版搜尋頁 HTML）
 - `remote.YoutubeDataSource`：解析 `ytInitialData` JSON → List&lt;VideoResult&gt;
-- `remote.StreamResolver`：NewPipe Extractor → 音訊串流 URL
-- `remote.OkHttpDownloader` / `NetworkModule`：共用 OkHttpClient（UA/Cookie 攔截器）
+- `remote.stream.AudioStreamSource`：串流解析來源抽象（data 層內部型別），三個實作依優先序組成 fallback 鏈：
+  - `NewPipeStreamSource`（主路徑）：NewPipe Extractor
+  - `InnerTubeStreamSource`：直連 InnerTube player API（IOS → ANDROID_VR client，免 poToken；client 版本號為易腐常數）
+  - `PipedStreamSource`：Piped 公開實例 `/streams/{id}`（最後手段）
+- `remote.stream.FallbackStreamResolver`：依序嘗試來源、成功結果 TTL 快取、經 `StreamErrorClassifier` 分類錯誤並聚合可讀訊息
+- `remote.OkHttpDownloader` / `NetworkModule`：共用 OkHttpClient（UA/Cookie 攔截器）；`stream.OkHttpStreamHttpTransport` 為 fallback 來源共用傳輸層
 - `repository.*Impl`：實作 domain interface（Entity ↔ Domain mapping）
 - `di.DataModule`：Database / Dispatcher / Repository 三組綁定
 
@@ -109,7 +113,7 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"; .\gradlew.bat as
 
 | 風險 | 影響 | 對策 | Owner |
 |------|------|------|-------|
-| YouTube 改版使 ytInitialData / NewPipe 失效 | 搜尋、播放全掛 | 每日煙霧測試；StreamResolver 錯誤訊息已顯示於通知；必要時升級 extractor 版本 | B |
+| YouTube 改版使 ytInitialData / NewPipe 失效；匿名 IP 遭 bot 偵測封鎖（LOGIN_REQUIRED「Sign in to confirm you're not a bot」） | 搜尋、播放全掛 | StreamResolver 改多層 fallback：NewPipe → InnerTube 直連（IOS／ANDROID_VR client，免 poToken）→ Piped 實例，成功結果 TTL 快取；錯誤分類聚合顯示於通知。extractor 升級由 A 走統一 PR；poToken/BotGuard WebView 方案成本高暫緩（見 TEAM.md §7） | B |
 | Foreground Service 政策（API 34+） | 上架審查 / 背景 被殺 | 已宣告 `foregroundServiceType=mediaPlayback`；未來接 MediaSessionService | B |
 | 串流 URL 有時效性 | 暫停過久後恢復失敗 | 失敗時重新 resolve（MusicService 已有 job cancel/re-run 機制） | B |
 | WebView 播放器與音訊服務同時發聲 | 使用者困惑 | Roadmap：以 ExoPlayer 畫面取代 WebView | C+B |

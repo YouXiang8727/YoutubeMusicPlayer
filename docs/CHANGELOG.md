@@ -21,6 +21,7 @@
 
 ### Fixed
 - 補上 `MusicService` 的 `androidx.media3.session.MediaSessionService` intent-filter（media3 1.6+ 要求，否則 SessionToken 解析失敗導致 App 啟動即 crash）；Controller 連線初始化改為降級處理不炸 composition
+- 串流解析遭 YouTube 匿名 bot 封鎖（LOGIN_REQUIRED「Sign in to confirm you're not a bot」）時播放失敗：改多層 fallback——NewPipe 主路徑失敗後依序嘗試 InnerTube 直連（IOS → ANDROID_VR client，免 poToken）與 Piped 公開實例，成功結果以 TTL 快取；全鏈失敗時於媒體通知聚合各來源錯誤與分類提示
 
 ### Removed
 - 移除 legacy `androidx.media` 依賴（通知改由 Media3 session 提供）
