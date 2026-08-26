@@ -9,6 +9,11 @@
 
 ## [Unreleased]
 
+### Docs
+- 新增「文件同步要求」（`docs/TEAM.md` §4）：程式碼異動必須在同一 PR 內同步維護對應文件；所有 merge 進 `master` 的 PR 一律在本檔 `[Unreleased]` 加一筆
+- 新增 `docs/CHANGELOG.md`（Keep a Changelog 格式），並補錄 v1.0.0 歷史決策
+- 新增 `.github/pull_request_template.md`：含文件同步 checklist，未勾選者 Approver 不得 Approve
+- 團隊規範的保護分支名稱由 `main` 改為 `master`，對齊實際 repo
 ## [1.0.0] - 2026-08
 
 ### Added
