@@ -1,6 +1,6 @@
 ---
 description: UI Engineer(角色 C)- 前端介面工程師。負責 core:ui 共用元件與 feature/search、feature/playlist、feature/player 的 Screen 與 Compose UI。畫面、互動、Compose 相關任務使用。
-mode: all
+mode: subagent
 permission:
   edit:
     "**": ask

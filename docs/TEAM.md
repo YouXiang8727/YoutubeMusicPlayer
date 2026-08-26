@@ -125,6 +125,11 @@ app ──▶ feature:* ──▶ core:ui ──▶ (無)
 | **B / C - subagent** | 開發＋自測＋依 DoD 回報（見下）；不做跨領域越界編輯 |
 | **D - QA subagent** | **獨立驗證**：單元測試執行、模擬器煙霧測試、logcat crash 監控、回歸報告；不修改任何產品程式碼，驗證 FAIL 退回 A 走同一套迴圈 |
 
+### 入口管制（物理強制）
+
+- 使用者**不直接接觸團隊成員**：B/C/D 的 agent 設定檔為 `mode: subagent`（只能被 Task tool 調用，無法被使用者直接切換對話）；A 為 `mode: primary` 且為專案 `default_agent`。**唯一入口 = A**——與「物理模組邊界」同一哲學：不靠自覺，靠設定檔擋住。
+- 角色專屬技能包置於 `.opencode/skills/`（B：`newpipe-stream-resolver`、C：`compose-ui-conventions`、D：`qa-smoke-runbook`），隨角色職責演進，由 A 於治理審查時一併維護。
+
 ### A 的治理例外（不算開發）
 
 A 擁有目錄中的**治理性工作**——`docs/**` 規範與架構文件、`.github/**` CI 與流程、
