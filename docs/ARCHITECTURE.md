@@ -1,6 +1,6 @@
 # MyMediaPlayer 架構文件
 
-> Stack：Kotlin 2.2 + Compose (BOM) + Hilt + Room + Retrofit/OkHttp + Media3 ExoPlayer + NewPipeExtractor
+> Stack：Kotlin 2.2 + Compose (BOM) + Hilt + Room + Retrofit/OkHttp + Media3 ExoPlayer/MediaSession + NewPipeExtractor
 > Build：Gradle 9.4 / AGP 9.2（內建 Kotlin）/ JDK 21
 
 ---
@@ -58,8 +58,14 @@
 
 ### feature:search | playlist | player
 - `*Route`（Hilt 容器）→ `*Screen`（無狀態 Composable）＋ `*ViewModel`（StateFlow + Intent）
-- `feature.player.service.MusicService`：Foreground Service；解析串流 → ExoPlayer 播放 → 通知列控制
-  - Service 的 Manifest 宣告在 feature 模組內（manifest merging 併入 app）
+- `feature.player.playback.PlayerController`：播放控制介面（命令 + `StateFlow<PlaybackSnapshot>`），
+  ViewModel 只注入此介面；實作 `MediaControllerPlayerController` 以 MediaController 連線至 MediaSession
+- `feature.player.MiniPlayerBar`：前景常駐迷你播放列（隨機／前後曲／循環／歌名／進度條），由 app 層掛載於底部
+- `feature.player.service.MusicService`：Media3 `MediaSessionService`
+  - 播放佇列：點播曲目在播放清單中 → 整份清單從該曲起播；否則單曲（`playback.PlaybackQueueBuilder` 純函數，有單元測試）
+  - 串流 URL 以 `ResolvingDataSource` 於載入當下逐首解析（NewPipe）
+  - 通知由系統自動產生：歌名、進度條（可拖曳 seek）、播放/暫停/前後曲；隨機與循環為 custom layout 按鈕（custom command）
+  - Service 的 Manifest 宣告在 feature 模組內（manifest merging 併入 app）；POST_NOTIFICATIONS 由 app 於啟動時動態請求
 
 ### :app
 - `Routes` + NavHost；bottom bar（搜尋 / 播放清單）
@@ -73,7 +79,8 @@ UI Intent ──▶ ViewModel.onIntent ──▶ UseCase ──▶ Repository(in
    UiState ◀── StateFlow ◀── ViewModel ◀── Flow ◀──┤
                                                     ├─▶ Room（playlist 表）
                                                     └─▶ Retrofit/NewPipe（YouTube）
-播放：PlayerViewModel ──▶ MusicService.start() ──▶ StreamResolver ──▶ ExoPlayer
+播放：PlayerViewModel ──▶ PlayerController ──▶ MediaController ──▶ MusicService(MediaSession) ──▶ ExoPlayer
+      （前景 MiniPlayerBar 與背景通知共用同一 MediaSession 狀態源）
 ```
 
 ## 5. 新功能落地路徑（SOP）
@@ -106,6 +113,8 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"; .\gradlew.bat as
 | Foreground Service 政策（API 34+） | 上架審查 / 背景 被殺 | 已宣告 `foregroundServiceType=mediaPlayback`；未來接 MediaSessionService | B |
 | 串流 URL 有時效性 | 暫停過久後恢復失敗 | 失敗時重新 resolve（MusicService 已有 job cancel/re-run 機制） | B |
 | WebView 播放器與音訊服務同時發聲 | 使用者困惑 | Roadmap：以 ExoPlayer 畫面取代 WebView | C+B |
+| 通知權限（Android 13+）未授予 | 背景播放時通知不出現（音訊不受影響） | App 啟動時動態請求 POST_NOTIFICATIONS；拒絕僅影響通知與鎖屏控制 | C |
+| 逐首解析串流 URL 的切歌延遲 | 下一首開始前有解析等待（NewPipe 網路往返） | ResolvingDataSource 快取已解析結果；buffering 狀態由系統 UI 呈現；必要時改預先解析下一首 | B |
 
 ## 8. 歷史決策
 

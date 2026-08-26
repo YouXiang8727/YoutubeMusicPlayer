@@ -96,7 +96,7 @@ app ──▶ feature:* ──▶ core:ui ──▶ (無)
 - [ ] 導入 `detekt` + 自訂規則（import 邊界再保險一層）
 - [ ] 導入 `dependency-guard` 鎖定模組 API 面
 - [ ] `build-logic/convention`：AGP 9 built-in Kotlin 工具鏈穩定後，把各 library 重複的 build 設定抽成 convention plugin
-- [ ] MusicService 升級 Media3 `MediaSessionService`（鎖屏控制、藍牙耳機按鍵）
+- [x] MusicService 升級 Media3 `MediaSessionService`（鎖屏控制、藍牙耳機按鍵）— 已於播放控制功能 PR 完成
 - [ ] NewPipe Extractor 版本鎖定策略與失效 fallback（YouTube 改版風險）
 
 ## 7. 已知取捨（決策記錄）
@@ -107,3 +107,6 @@ app ──▶ feature:* ──▶ core:ui ──▶ (無)
 | PlaylistItem 拆成 Domain Model + Room Entity | 讓 `core:domain` 保持零 Android 依賴，Room 細節封死在 `core:data` |
 | 移除 VideoResult 的 @Serializable | 全專案沒有序列化使用點，移除後 domain 不需要 serialization plugin |
 | detekt / dependency-guard 延後 | 模組邊界已由 Gradle 依賴圖物理強制，工具再加是第二道鎖 |
+| 播放控制在 feature 內（PlayerController），不進 core:domain | 播放是裝置能力而非業務領域；MiniPlayerBar 由 app 層掛載，feature 間不需互相依賴 |
+| 串流 URL 逐首解析（ResolvingDataSource）而非預解析全佇列 | NewPipe 解析有時效性且成本高；loader thread 同步解析＋快取已足夠 |
+| 通知上隨機／循環按鈕圖示不隨狀態切換 | DefaultMediaNotificationProvider 的 custom layout 不支援 per-state icon；精確狀態以前景 App 內為準 |

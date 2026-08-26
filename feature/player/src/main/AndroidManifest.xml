@@ -5,7 +5,12 @@
         <service
             android:name=".service.MusicService"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
+            android:foregroundServiceType="mediaPlayback">
+            <!-- media3 1.6+：SessionToken 需藉此 action 找到 MediaSessionService -->
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

@@ -9,6 +9,21 @@
 
 ## [Unreleased]
 
+### Added
+- 前景迷你播放列（MiniPlayerBar）：App 開啟時常駐底部，含隨機播放開關、上一首／下一首、單曲／清單循環切換、曲目名稱與可拖曳進度條
+- 背景通知播放控制：Media3 MediaSession 通知含歌名、進度條（seek）、播放/暫停/前後曲，並新增隨機與循環按鈕
+- 播放佇列：點播的歌在播放清單中時以整份清單為佇列從該曲起播；支援鎖屏控制與藍牙耳機按鍵
+
+### Changed
+- MusicService 由手刻 Foreground Service 重構為 Media3 `MediaSessionService`；前景 UI 與背景通知共用同一狀態源
+- Media3 升級 1.5.1 → 1.11.0（exoplayer / session 統一）
+
+### Fixed
+- 補上 `MusicService` 的 `androidx.media3.session.MediaSessionService` intent-filter（media3 1.6+ 要求，否則 SessionToken 解析失敗導致 App 啟動即 crash）；Controller 連線初始化改為降級處理不炸 composition
+
+### Removed
+- 移除 legacy `androidx.media` 依賴（通知改由 Media3 session 提供）
+
 ### Docs
 - 新增「文件同步要求」（`docs/TEAM.md` §4）：程式碼異動必須在同一 PR 內同步維護對應文件；所有 merge 進 `master` 的 PR 一律在本檔 `[Unreleased]` 加一筆
 - 新增 `docs/CHANGELOG.md`（Keep a Changelog 格式），並補錄 v1.0.0 歷史決策
