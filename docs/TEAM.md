@@ -66,6 +66,22 @@ app ──▶ feature:* ──▶ core:ui ──▶ (無)
 - App 名稱等共用字串以 **app module 為準**（library 內同名資源會被 app 覆蓋）。
 - feature 內新增資源必須加前綴避免衝突（如 `ic_music_notification.xml`）。
 
+### 文件同步要求（Code Changes ⇒ Docs Changes）
+程式碼異動時**必須在同一個 PR 內**同步維護對應文件；文件異動隨功能 PR 同送，不另開文件 PR（避免漂移）。Approver 審查時一併檢查：
+
+| 異動類型 | 必須同步更新的文件 |
+|----------|--------------------|
+| 新增/刪除 module、依賴方向調整 | `docs/ARCHITECTURE.md` §1 模組總覽、§2 依賴規則 |
+| Domain model / Repository interface / UseCase 變更 | `docs/ARCHITECTURE.md` §3 各層職責與關鍵類別 |
+| 第三方庫新增/升級（`gradle/libs.versions.toml`） | `docs/ARCHITECTURE.md` 開頭 Stack 區、`docs/CHANGELOG.md` |
+| 新風險出現或對策變化 | `docs/ARCHITECTURE.md` §7 風險登記簿 |
+| 重大架構決策／取捨 | `docs/TEAM.md` §7 已知取捨 |
+| **所有 merge 進 `main` 的 PR（一律，無例外）** | `docs/CHANGELOG.md` 的 `[Unreleased]` 加一筆 |
+
+- `docs/CHANGELOG.md` 採 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/) 格式；條目類別對應 Conventional Commits（`feat` → Added、`fix` → Fixed、`refactor`/`perf` → Changed、移除 → Removed）。
+- 發版時由 Tech Lead 將 `[Unreleased]` 改為版本號 + 日期。
+- PR template 的文件同步 checklist 為最低強制點；未勾選者 Approver 不得 Approve。
+
 ## 5. 例行節奏（2 週 Sprint）
 
 | 事件 | 時間 | 產出 |
