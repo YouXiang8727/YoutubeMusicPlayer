@@ -51,7 +51,7 @@ fun SearchScreen(
     state: SearchUiState,
     snackbarHostState: SnackbarHostState,
     onIntent: (SearchIntent) -> Unit,
-    onOpenVideo: (VideoResult) -> Unit
+    onPlayVideo: (VideoResult) -> Unit
 ) {
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         Column(
@@ -100,7 +100,7 @@ fun SearchScreen(
                     items(state.results, key = { it.videoId }) { video ->
                         VideoCard(
                             video = video,
-                            onClick = { onOpenVideo(video) },
+                            onClick = { onPlayVideo(video) },
                             onAdd = { onIntent(SearchIntent.AddToPlaylist(video)) }
                         )
                     }
@@ -168,7 +168,7 @@ private fun VideoCard(
 @Composable
 fun SearchRoute(
     viewModel: SearchViewModel = hiltViewModel(),
-    onOpenVideo: (VideoResult) -> Unit
+    onPlayVideo: (VideoResult) -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -181,7 +181,7 @@ fun SearchRoute(
         state = state,
         snackbarHostState = snackbarHostState,
         onIntent = viewModel::onIntent,
-        onOpenVideo = onOpenVideo
+        onPlayVideo = onPlayVideo
     )
 }
 
@@ -193,7 +193,7 @@ private fun SearchScreenEmptyPreview() {
             state = SearchUiState(),
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
-            onOpenVideo = {}
+            onPlayVideo = {}
         )
     }
 }
@@ -213,7 +213,7 @@ private fun SearchScreenResultsPreview() {
             ),
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
-            onOpenVideo = {}
+            onPlayVideo = {}
         )
     }
 }

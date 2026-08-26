@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.media3.common.C
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -83,6 +84,7 @@ class MediaControllerPlayerController @Inject constructor(
                 override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) { trySend(Unit) }
                 override fun onShuffleModeEnabledChanged(enabled: Boolean) { trySend(Unit) }
                 override fun onRepeatModeChanged(repeatMode: Int) { trySend(Unit) }
+                override fun onPlayerError(error: PlaybackException) { trySend(Unit) }
             }
             controller.addListener(listener)
             awaitClose { controller.removeListener(listener) }
@@ -103,6 +105,8 @@ class MediaControllerPlayerController @Inject constructor(
 
     private fun MediaController.toSnapshot(): PlaybackSnapshot {
         val hasCurrent = currentMediaItem != null && playbackState != Player.STATE_IDLE
+        // playerError 由 ExoPlayer 保留到下次 prepare() 自動清除，無需手動管理生命週期
+        val errorMessage = playerError?.let { PlaybackErrorDescriber.describe(it.errorCodeName, it.causeChainMessages()) }
         return PlaybackSnapshot(
             hasCurrent = hasCurrent,
             videoId = currentMediaItem?.mediaId.orEmpty(),
@@ -111,9 +115,21 @@ class MediaControllerPlayerController @Inject constructor(
             positionMs = contentPosition.coerceAtLeast(0L),
             durationMs = if (contentDuration == C.TIME_UNSET) 0L else contentDuration,
             shuffleEnabled = shuffleModeEnabled,
-            repeatMode = if (repeatMode == Player.REPEAT_MODE_ONE) RepeatMode.ONE else RepeatMode.ALL
+            repeatMode = if (repeatMode == Player.REPEAT_MODE_ONE) RepeatMode.ONE else RepeatMode.ALL,
+            errorMessage = errorMessage
         )
     }
+
+    /**
+     * 從 PlaybackException 取值的薄介面卡：收集 cause chain 各層 message（最外層→最深）。
+     * 限深以防異常的循環 cause chain；映射邏輯在純 Kotlin 的 [PlaybackErrorDescriber]。
+     */
+    private fun Throwable.causeChainMessages(): List<String?> =
+        generateSequence(this) { it.cause }
+            .take(MAX_CAUSE_CHAIN_DEPTH)
+            .drop(1) // 不含 PlaybackException 自身的泛用訊息，無 cause 時走 errorCodeName 兜底
+            .map { it.message }
+            .toList()
 
     private inline fun withController(block: (MediaController) -> Unit) {
         controllerFlow.value?.let(block)
@@ -151,5 +167,6 @@ class MediaControllerPlayerController @Inject constructor(
     companion object {
         private const val TAG = "PlayerController"
         private const val PROGRESS_INTERVAL_MS = 250L
+        private const val MAX_CAUSE_CHAIN_DEPTH = 16
     }
 }

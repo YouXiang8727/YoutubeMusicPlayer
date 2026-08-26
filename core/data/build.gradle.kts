@@ -42,7 +42,11 @@ dependencies {
     // NewPipe Extractor（解析音訊串流，無需 API Key）
     implementation(libs.newpipe.extractor)
 
-    // Coroutines + Serialization JSON 解析（ytInitialData）
+    // Coroutines + Serialization JSON 解析（ytInitialData / InnerTube / Piped）
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+
+    // Unit tests（座標取自 libs.versions.toml 既有項目，未新增版本）
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
