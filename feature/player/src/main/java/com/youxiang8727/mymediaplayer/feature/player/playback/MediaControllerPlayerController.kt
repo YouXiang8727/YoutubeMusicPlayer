@@ -44,15 +44,10 @@ class MediaControllerPlayerController @Inject constructor(
     override val playback: StateFlow<PlaybackSnapshot> = _playback.asStateFlow()
 
     init {
-        val token = SessionToken(context, ComponentName(context, MusicService::class.java))
-        val future = MediaController.Builder(context, token).buildAsync()
-        future.addListener(
-            {
-                runCatching { controllerFlow.value = future.get() }
-                    .onFailure { android.util.Log.e(TAG, "MediaController 連線失敗", it) }
-            },
-            { command -> command.run() } // direct executor：主執行緒回呼
-        )
+        // SessionToken 解析依賴 manifest 的 MediaSessionService intent-filter；
+        // 失敗時降級為「未連線」（playback 停留空狀態），不可炸掉 composition。
+        runCatching { connectToSession() }
+            .onFailure { android.util.Log.e(TAG, "MediaController 連線初始化失敗", it) }
 
         scope.launch {
             controllerFlow.collect { controller ->
@@ -63,6 +58,18 @@ class MediaControllerPlayerController @Inject constructor(
                 }
             }
         }
+    }
+
+    private fun connectToSession() {
+        val token = SessionToken(context, ComponentName(context, MusicService::class.java))
+        val future = MediaController.Builder(context, token).buildAsync()
+        future.addListener(
+            {
+                runCatching { controllerFlow.value = future.get() }
+                    .onFailure { android.util.Log.e(TAG, "MediaController 連線失敗", it) }
+            },
+            { command -> command.run() } // direct executor：主執行緒回呼
+        )
     }
 
     /** 監聽 Player 事件並定時取樣 position，折疊成快照流。 */

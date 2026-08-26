@@ -18,6 +18,9 @@
 - MusicService 由手刻 Foreground Service 重構為 Media3 `MediaSessionService`；前景 UI 與背景通知共用同一狀態源
 - Media3 升級 1.5.1 → 1.11.0（exoplayer / session 統一）
 
+### Fixed
+- 補上 `MusicService` 的 `androidx.media3.session.MediaSessionService` intent-filter（media3 1.6+ 要求，否則 SessionToken 解析失敗導致 App 啟動即 crash）；Controller 連線初始化改為降級處理不炸 composition
+
 ### Removed
 - 移除 legacy `androidx.media` 依賴（通知改由 Media3 session 提供）
 
