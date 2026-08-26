@@ -1,7 +1,7 @@
 package com.youxiang8727.mymediaplayer.feature.player.di
 
-import com.youxiang8727.mymediaplayer.feature.player.DefaultMusicServiceController
-import com.youxiang8727.mymediaplayer.feature.player.MusicServiceController
+import com.youxiang8727.mymediaplayer.feature.player.playback.MediaControllerPlayerController
+import com.youxiang8727.mymediaplayer.feature.player.playback.PlayerController
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -14,7 +14,7 @@ abstract class PlayerModule {
 
     @Binds
     @Singleton
-    abstract fun bindMusicServiceController(
-        impl: DefaultMusicServiceController
-    ): MusicServiceController
+    abstract fun bindPlayerController(
+        impl: MediaControllerPlayerController
+    ): PlayerController
 }

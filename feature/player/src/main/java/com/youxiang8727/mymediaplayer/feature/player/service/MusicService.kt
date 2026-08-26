@@ -2,198 +2,238 @@ package com.youxiang8727.mymediaplayer.feature.player.service
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
-import android.app.Service
-import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.CommandButton
+import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.MediaSession
+import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import com.youxiang8727.mymediaplayer.core.domain.repository.AudioStreamRepository
+import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
 import com.youxiang8727.mymediaplayer.feature.player.R
+import com.youxiang8727.mymediaplayer.feature.player.playback.PlaybackQueueBuilder
 import dagger.hilt.android.AndroidEntryPoint
+import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * 前景服務：背景音訊播放。
- * 流程：收到 PLAY → 立刻 startForeground（顯示「解析中」）
- *      → AudioStreamRepository 取得真實串流 URL → ExoPlayer 播放 → 更新通知。
- * 與播放清單無關：直接從搜尋結果點開的影片也能背景播放。
+ * 前景媒體服務（Media3 MediaSessionService）。
+ *
+ * - 播放佇列：點播的歌在播放清單中 → 整份清單從該曲起播；否則單曲。
+ * - 串流 URL 以 ResolvingDataSource 於載入當下逐首解析（NewPipe），loader thread 內同步等待。
+ * - 隨機/循環由 ExoPlayer 原生支援，系統通知、鎖屏、藍牙耳機鍵皆可用。
  */
 @AndroidEntryPoint
-class MusicService : Service() {
+class MusicService : MediaSessionService() {
 
     @Inject lateinit var streamResolver: AudioStreamRepository
+    @Inject lateinit var playlistRepository: PlaylistRepository
 
     private var player: ExoPlayer? = null
+    private var mediaSession: MediaSession? = null
 
-    // ExoPlayer 規定只能在主執行緒存取；
-    // StreamResolver 內部會自行切換到 IO 做網路工作，回來後仍在主執行緒。
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var playJob: Job? = null
+
+    private val customLayout: ImmutableList<CommandButton> by lazy {
+        ImmutableList.of(
+            CommandButton.Builder()
+                .setDisplayName("隨機播放")
+                .setIconResId(R.drawable.ic_shuffle)
+                .setSessionCommand(SessionCommand(COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
+                .build(),
+            CommandButton.Builder()
+                .setDisplayName("循環模式（清單／單曲）")
+                .setIconResId(R.drawable.ic_repeat)
+                .setSessionCommand(SessionCommand(COMMAND_CYCLE_REPEAT, Bundle.EMPTY))
+                .build()
+        )
+    }
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+
+        val newPlayer = ExoPlayer.Builder(applicationContext)
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(resolvingDataSourceFactory())
+            )
+            .build()
+        player = newPlayer
+        mediaSession = MediaSession.Builder(this, newPlayer)
+            .setCallback(sessionCallback)
+            .build()
+
+        setMediaNotificationProvider(
+            DefaultMediaNotificationProvider.Builder(this)
+                .setChannelId(CHANNEL_ID)
+                .setChannelName(R.string.feature_player_channel_playback)
+                .build()
+                .apply { setSmallIcon(R.drawable.ic_music_notification) }
+        )
     }
+
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_PLAY -> {
                 val videoId = intent.getStringExtra(EXTRA_VIDEO_ID).orEmpty()
                 val title = intent.getStringExtra(EXTRA_TITLE) ?: videoId
-                if (videoId.isBlank()) {
-                    stopSelf()
-                } else {
-                    handlePlay(videoId, title)
-                }
+                if (videoId.isBlank()) stopSelf() else handlePlay(videoId, title)
             }
-            ACTION_TOGGLE -> player?.let { if (it.isPlaying) it.pause() else it.play() }
-            ACTION_STOP -> shutdownAndStop()
+            ACTION_STOP -> {
+                player?.stop()
+                stopSelf()
+            }
         }
-        return START_NOT_STICKY
+        return super.onStartCommand(intent, flags, startId)
     }
 
+    /** 載入佇列並從點播的曲目開始播放。 */
     private fun handlePlay(videoId: String, title: String) {
-        // 必須在 startForegroundService 後盡快呼叫 startForeground
-        startForeground(NOTIFICATION_ID, buildNotification("解析中… $title"))
-
-        ensurePlayer()
-
-        // 若前一個影片還在解析，取消它
-        playJob?.cancel()
-        playJob = serviceScope.launch {
-            streamResolver.resolveAudioUrl(videoId)
-                .onSuccess { url ->
-                    if (!isActive) return@launch
-                    val item = MediaItem.Builder()
-                        .setMediaId(videoId)
-                        .setUri(url) // ← 真實串流位址
-                        .setMediaMetadata(
-                            MediaMetadata.Builder().setTitle(title).build()
-                        )
-                        .build()
-                    player?.apply {
-                        setMediaItem(item)
-                        prepare()
-                        playWhenReady = true
-                    }
-                    updateNotification(title)
-                }
-                .onFailure { e ->
-                    updateNotification("無法播放：${e.message?.take(48) ?: "未知錯誤"}")
-                    delay(2_500)
-                    shutdownAndStop()
-                }
+        serviceScope.launch {
+            val playlistItems = playlistRepository.observeAll().first()
+            val queue = PlaybackQueueBuilder.build(playlistItems, videoId, title)
+            player?.apply {
+                setMediaItems(queue.entries.map { it.toMediaItem() })
+                seekTo(queue.startIndex, 0L)
+                prepare()
+                playWhenReady = true
+            }
         }
     }
 
-    private fun ensurePlayer() {
-        if (player == null) {
-            player = ExoPlayer.Builder(applicationContext).build()
-        }
-    }
+    // region MediaSession callback（通知列上的隨機 / 循環按鈕）
 
-    private fun buildNotification(text: String): android.app.Notification =
-        NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.app_name))
-            .setContentText(text)
-            .setSmallIcon(R.drawable.ic_music_notification)
-            .setContentIntent(contentIntent())
-            .setOngoing(true)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .addAction(0, "播放/暫停", actionIntent(ACTION_TOGGLE, requestCode = 1))
-            .addAction(0, "停止", actionIntent(ACTION_STOP, requestCode = 2))
-            .setStyle(
-                androidx.media.app.NotificationCompat.MediaStyle()
-                    .setShowActionsInCompactView(0, 1)
+    private val sessionCallback = object : MediaSession.Callback {
+
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult {
+            val sessionCommands =
+                MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+                    .add(SessionCommand(COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
+                    .add(SessionCommand(COMMAND_CYCLE_REPEAT, Bundle.EMPTY))
+                    .build()
+            return MediaSession.ConnectionResult.accept(
+                sessionCommands,
+                MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS
             )
+        }
+
+        /** 通知列上的隨機／循環按鈕（custom layout 於連線後掛載）。 */
+        override fun onPostConnect(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            session.setCustomLayout(controller, customLayout)
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle
+        ): ListenableFuture<SessionResult> {
+            when (customCommand.customAction) {
+                COMMAND_TOGGLE_SHUFFLE ->
+                    player?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled }
+                COMMAND_CYCLE_REPEAT ->
+                    player?.let {
+                        it.repeatMode =
+                            if (it.repeatMode == Player.REPEAT_MODE_ONE) Player.REPEAT_MODE_ALL
+                            else Player.REPEAT_MODE_ONE
+                    }
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+    }
+
+    // endregion
+
+    /**
+     * 逐首解析串流 URL：MediaItem.uri 指向 watch 頁，開流時攔截換成真實音訊 URL。
+     * Resolver 於 ExoPlayer loader thread 呼叫，可同步做網路工作。
+     */
+    private fun resolvingDataSourceFactory(): DataSource.Factory {
+        val resolvedUrls = ConcurrentHashMap<String, String>()
+        val resolver = ResolvingDataSource.Resolver { dataSpec ->
+            val videoId = dataSpec.uri.getQueryParameter("v")
+                ?: dataSpec.uri.lastPathSegment
+                ?: throw IOException("無法從 URI 取得 videoId：${dataSpec.uri}")
+            val url = resolvedUrls.getOrPut(videoId) {
+                runBlockingResolve(videoId)
+            }
+            dataSpec.buildUpon().setUri(url).build()
+        }
+        return ResolvingDataSource.Factory(
+            DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true),
+            resolver
+        )
+    }
+
+    private fun runBlockingResolve(videoId: String): String =
+        kotlinx.coroutines.runBlocking {
+            streamResolver.resolveAudioUrl(videoId)
+                .getOrElse { throw IOException("解析串流失敗：${it.message}", it) }
+        }
+
+    private fun PlaybackQueueBuilder.QueueEntry.toMediaItem(): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(videoId)
+            .setUri("https://www.youtube.com/watch?v=$videoId") // 由 ResolvingDataSource 替換
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
             .build()
 
-    private fun updateNotification(text: String) {
-        getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, buildNotification(text))
+    /** 使用者從最近使用清單劃掉 App：沒在播就收掉服務，避免孤兒前景通知。 */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val p = player
+        if (p == null || !p.playWhenReady || p.mediaItemCount == 0 && p.playbackState == Player.STATE_IDLE) {
+            stopSelf()
+        }
     }
-
-    /** 開啟 App 的 Launcher Activity（以 package 反查，避免 feature 依賴 app 層）。 */
-    private fun contentIntent(): PendingIntent {
-        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-            ?: Intent(Intent.ACTION_MAIN).apply {
-                addCategory(Intent.CATEGORY_LAUNCHER)
-                setPackage(packageName)
-            }
-        return PendingIntent.getActivity(
-            this, 0,
-            launchIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-
-    private fun actionIntent(action: String, requestCode: Int): PendingIntent =
-        PendingIntent.getService(
-            this, requestCode,
-            Intent(this, MusicService::class.java).setAction(action),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
 
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "背景播放",
-            NotificationManager.IMPORTANCE_LOW
-        )
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-    }
-
-    private fun shutdownAndStop() {
-        playJob?.cancel()
-        player?.release()
-        player = null
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        // Channel 由 DefaultMediaNotificationProvider 依 CHANNEL_ID 建立，此處不需手動建。
     }
 
     override fun onDestroy() {
         serviceScope.cancel()
+        mediaSession?.release()
+        mediaSession = null
         player?.release()
         player = null
         super.onDestroy()
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onBind(intent: Intent?): IBinder? = super.onBind(intent)
 
     companion object {
         const val CHANNEL_ID = "music_playback"
         const val NOTIFICATION_ID = 1001
         const val ACTION_PLAY = "com.youxiang8727.mymediaplayer.action.PLAY"
-        const val ACTION_TOGGLE = "com.youxiang8727.mymediaplayer.action.TOGGLE"
         const val ACTION_STOP = "com.youxiang8727.mymediaplayer.action.STOP"
+        const val COMMAND_TOGGLE_SHUFFLE = "com.youxiang8727.mymediaplayer.command.TOGGLE_SHUFFLE"
+        const val COMMAND_CYCLE_REPEAT = "com.youxiang8727.mymediaplayer.command.CYCLE_REPEAT"
         const val EXTRA_VIDEO_ID = "extra_video_id"
         const val EXTRA_TITLE = "extra_title"
-
-        fun start(context: Context, videoId: String, title: String) {
-            context.startForegroundService(
-                Intent(context, MusicService::class.java)
-                    .setAction(ACTION_PLAY)
-                    .putExtra(EXTRA_VIDEO_ID, videoId)
-                    .putExtra(EXTRA_TITLE, title)
-            )
-        }
-
-        fun stop(context: Context) {
-            context.startService(
-                Intent(context, MusicService::class.java).setAction(ACTION_STOP)
-            )
-        }
     }
 }

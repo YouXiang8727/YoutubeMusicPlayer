@@ -2,4 +2,5 @@
 <resources>
     <!-- library 內同名資源會被 :app 覆蓋，實際顯示以 app 為準 -->
     <string name="app_name">My MediaPlayer</string>
+    <string name="feature_player_channel_playback" translatable="false">背景播放</string>
 </resources>
