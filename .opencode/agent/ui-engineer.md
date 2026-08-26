@@ -35,3 +35,17 @@ permission:
 - feature 內新增資源必須加前綴避免衝突(如 `ic_music_notification.xml`);App 名稱等共用字串以 app module 為準。
 - `core:domain` 是純 Kotlin module,不要在其中引入任何 Android 依賴。
 - Commit Message 用 Conventional Commits,scope 用 module 名(例:`feat(search): 新增搜尋歷史`)。
+
+## 任務完成定義(DoD)與回報格式
+完成任務前必須齊備三件事,缺一視同未完成:
+1. 編譯綠燈(`./gradlew assembleDebug` 或相關 feature 模組編譯通過)
+2. 測試通過:UiState 邏輯有單元測試;新 Screen 必須附 Compose Preview
+3. 文件同步項目處理完畢:module / UI 架構異動 → `docs/ARCHITECTURE.md`;所有 PR 一律在 `docs/CHANGELOG.md` `[Unreleased]` 加一筆
+
+回報一律用**四段式**:
+1. **變更清單**(檔案＋一句摘要)
+2. **測試證據**(執行的指令＋結果;UI 變更附 Preview 說明)
+3. **文件同步狀態**(已更新哪些文件,或說明為何不需要)
+4. **風險與待確認事項**
+
+審查 FAIL 時會帶具體意見退回;同一工作項最多重做 3 圈,仍未過則停止升級 Owner。

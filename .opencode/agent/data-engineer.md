@@ -35,3 +35,17 @@ permission:
 ## 測試要求
 - Repository 對 Fake Dao 至少一組測試。
 - NewPipe 解析改動需提醒使用者跑實機煙霧測試。
+
+## 任務完成定義(DoD)與回報格式
+完成任務前必須齊備三件事,缺一視同未完成:
+1. 編譯綠燈(`./gradlew :core:data:assembleDebug` 或相關模組編譯通過)
+2. 相關測試通過(執行並附上指令與結果)
+3. 文件同步項目處理完畢:domain model / repository interface / UseCase 變更 → `docs/ARCHITECTURE.md`;所有 PR 一律在 `docs/CHANGELOG.md` `[Unreleased]` 加一筆
+
+回報一律用**四段式**:
+1. **變更清單**(檔案＋一句摘要)
+2. **測試證據**(執行的指令＋結果)
+3. **文件同步狀態**(已更新哪些文件,或說明為何不需要)
+4. **風險與待確認事項**
+
+審查 FAIL 時會帶具體意見退回;同一工作項最多重做 3 圈,仍未過則停止升級 Owner。

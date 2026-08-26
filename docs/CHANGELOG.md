@@ -25,6 +25,9 @@
 - 移除 legacy `androidx.media` 依賴（通知改由 Media3 session 提供）
 
 ### Docs
+- 新增 TEAM.md §8「AI 協作運作模式（Loop Engineering）」：Tech Lead 純協調不開發、序列派工、審查迴圈（DoD／四段式回報／3 圈上限）、治理例外
+- 更新三個 agent 定義：tech-lead 改純協調者；data-engineer / ui-engineer 加 DoD 與回報格式
+- PR template 新增審查節：Approver ≠ 作者、DoD 檢查、3 圈升級路徑
 - 新增「文件同步要求」（`docs/TEAM.md` §4）：程式碼異動必須在同一 PR 內同步維護對應文件；所有 merge 進 `master` 的 PR 一律在本檔 `[Unreleased]` 加一筆
 - 新增 `docs/CHANGELOG.md`（Keep a Changelog 格式），並補錄 v1.0.0 歷史決策
 - 新增 `.github/pull_request_template.md`：含文件同步 checklist，未勾選者 Approver 不得 Approve

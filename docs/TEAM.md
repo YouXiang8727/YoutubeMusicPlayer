@@ -110,3 +110,33 @@ app ──▶ feature:* ──▶ core:ui ──▶ (無)
 | 播放控制在 feature 內（PlayerController），不進 core:domain | 播放是裝置能力而非業務領域；MiniPlayerBar 由 app 層掛載，feature 間不需互相依賴 |
 | 串流 URL 逐首解析（ResolvingDataSource）而非預解析全佇列 | NewPipe 解析有時效性且成本高；loader thread 同步解析＋快取已足夠 |
 | 通知上隨機／循環按鈕圖示不隨狀態切換 | DefaultMediaNotificationProvider 的 custom layout 不支援 per-state icon；精確狀態以前景 App 內為準 |
+
+## 8. AI 協作運作模式（Loop Engineering）
+
+> 本節適用於以 AI agent 執行團隊工作的情境：Tech Lead 為常駐**協調者**，
+> B / C 由對應 subagent 承擔（設定見 `.opencode/agent/`）。真人共事時仍以 §1–§7 為準。
+
+### 角色切分
+
+| 角色 | AI 模式下的職責 |
+|------|-----------------|
+| **A - Tech Lead** | **純協調**：需求確認 → 工作拆解與指派（R/A/I）→ 派工 → 審查 → merge `master`。**不撰寫 B/C 領域的產品程式碼** |
+| **B / C - subagent** | 開發＋自測＋依 DoD 回報（見下）；不做跨領域越界編輯 |
+
+### A 的治理例外（不算開發）
+
+A 擁有目錄中的**治理性工作**——`docs/**` 規範與架構文件、`.github/**` CI 與流程、
+`gradle/libs.versions.toml` 版本治理、根建置檔——由 A 親手執行，不受「不參與開發」限制。
+
+### 派工與序列依賴
+
+1. A 拆解任務時明確標註：負責角色（R）、涉及目錄、前置依賴、驗收標準。
+2. 有順序依賴的工作（例：先 service 後 Screen）：前序角色**回報完成且 A 審查通過**後，才派後續角色。
+3. subagent 調用為同步等待；回報未達 DoD 視同未完成，不進入下一棒。
+
+### 審查迴圈（Loop）
+
+- **DoD（完成定義）**：① 編譯綠燈 ② 相關測試通過 ③ 文件同步項目處理完畢——三者齊備才算「完成」。
+- **回報格式（四段式）**：① 變更清單（檔案＋摘要）　② 測試證據（執行指令＋結果）　③ 文件同步狀態　④ 風險與待確認事項。
+- **迴圈上限**：審查 FAIL → A 帶具體意見退回原角色重做；同一工作項最多 **3 圈**，仍未過則停止並升級 Owner 裁決。
+- **作者 ≠ 審查者**：開發類 PR 一律由 A 審查；A 的治理性變更（本節例外工作）不由 A 自審，由 Owner 或指定工程師複核。
