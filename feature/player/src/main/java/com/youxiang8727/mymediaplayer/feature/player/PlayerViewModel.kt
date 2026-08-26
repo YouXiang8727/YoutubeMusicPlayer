@@ -19,7 +19,7 @@ data class PlayerUiState(
     val title: String = ""
 )
 
-/** 迷你播放列 / 播放頁共用的播放意圖。 */
+/** 迷你播放列 / 播放頁共用的播放意圖。[Play] 另供外部列表（如搜尋結果）直接起播。 */
 sealed interface PlaybackIntent {
     data object TogglePlayPause : PlaybackIntent
     data object Next : PlaybackIntent
@@ -27,6 +27,13 @@ sealed interface PlaybackIntent {
     data object ToggleShuffle : PlaybackIntent
     data object CycleRepeat : PlaybackIntent
     data class Seek(val positionMs: Long) : PlaybackIntent
+
+    /**
+     * 直接起播指定影片，不導航至播放頁。
+     * 供外部列表（activity scope ViewModel，無 SavedStateHandle 導航參數）呼叫，
+     * 因此不走 [PlayerViewModel.startBackgroundPlayback]（該路徑依賴導航參數）。
+     */
+    data class Play(val videoId: String, val title: String) : PlaybackIntent
 }
 
 @HiltViewModel
@@ -58,7 +65,7 @@ class PlayerViewModel @Inject constructor(
         _messages.tryEmit("已停止背景播放")
     }
 
-    /** 給 MiniPlayerBar（activity scope）使用：以目前播放中的曲目為準。 */
+    /** 給 MiniPlayerBar（activity scope）使用；[PlaybackIntent.Play] 供外部列表直接起播。 */
     fun onPlaybackIntent(intent: PlaybackIntent) {
         when (intent) {
             is PlaybackIntent.TogglePlayPause -> playerController.togglePlayPause()
@@ -67,6 +74,7 @@ class PlayerViewModel @Inject constructor(
             is PlaybackIntent.ToggleShuffle -> playerController.toggleShuffle()
             is PlaybackIntent.CycleRepeat -> playerController.cycleRepeatMode()
             is PlaybackIntent.Seek -> playerController.seekTo(intent.positionMs)
+            is PlaybackIntent.Play -> playerController.play(intent.videoId, intent.title)
         }
     }
 

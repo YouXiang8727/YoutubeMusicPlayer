@@ -155,9 +155,13 @@ fun MyApp() {
                 .padding(padding),
             builder = {
                 composable(Routes.SEARCH) {
+                    // 點擊搜尋結果直接起播（不導航）：轉發給 activity-scoped PlayerViewModel，
+                    // 與 MiniPlayerBar 共用同一 MediaSession；App 退背景由 MusicService 前景服務接手。
                     SearchRoute(
-                        onOpenVideo = { video ->
-                            navController.navigate(Routes.player(video.videoId, video.title))
+                        onPlayVideo = { video ->
+                            playerViewModel.onPlaybackIntent(
+                                PlaybackIntent.Play(video.videoId, video.title)
+                            )
                         }
                     )
                 }
