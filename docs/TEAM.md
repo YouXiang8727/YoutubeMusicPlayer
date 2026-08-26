@@ -8,13 +8,14 @@
 
 | 代號 | 角色 | 擁有目錄 | 禁區 | 兼職 |
 |------|------|----------|------|------|
-| **A - Tech Lead** | 架構守門人 | `settings.gradle.kts`、`gradle/libs.versions.toml`、根 `build.gradle.kts`、`core/common`、`core/domain`、`.github/`、`docs/` | — | 唯一可 merge `master`；版本升級統一 PR |
+| **A - Tech Lead** | 架構守門人 | `settings.gradle.kts`、`gradle/libs.versions.toml`、根 `build.gradle.kts`、`core/common`、`core/domain`、`.github/`、`docs/`、`app/`（容器層） | B/C/D 的擁有目錄（治理例外見 §8） | 唯一可 merge `master`；版本升級統一 PR |
 | **B - Data/Media Engineer** | 資料與播放 | `core/data/`、`feature/player/src/main/java/**/service/` | `feature/*/ui`、`core/ui` | NewPipe / StreamResolver 穩定度監控 |
-| **C - UI Engineer** | 前端介面 | `core/ui/`、`feature/search/`、`feature/playlist/`、`feature/player/` 的 Screen | `data/remote`、`data/local`（只能透過 `core:domain` 的 UseCase） | 輪值 QA |
+| **C - UI Engineer** | 前端介面 | `core/ui/`、`feature/search/`、`feature/playlist/`、`feature/player/` 的 Screen | `data/remote`、`data/local`（只能透過 `core:domain` 的 UseCase） | — |
+| **D - QA Engineer** | 獨立驗證 | `docs/qa/`（測試計畫、煙霧清單、報告） | **所有產品程式碼目錄**（只驗證，不開發） | 發版前回歸測試總召 |
 
-- **輪值 QA**：每兩週輪一人，負責補該 Sprint 功能的測試並跑實機煙霧測試。
+- **QA 改為常設角色 D**：獨立於開發者執行驗證——單元測試執行、實機煙霧測試、logcat crash 監控、發版回歸。開發者自測不取代 D 的獨立驗證。
 - **Owner（你）**：只看 `master` 的 CI 綠燈與 PR 列表，不參與程式碼審查細節。
-- **RACI**：做的人 = R；另兩人中指定一人 = A（PR Approver）；其餘 = I。跨層改動（例：改 domain interface）一律 A = Tech Lead。
+- **RACI**：做的人 = R；其餘人中由 Tech Lead 指定一人 = A（PR Approver）；其餘 = I。跨層改動（例：改 domain interface）一律 A = Tech Lead。
 
 ## 2. 分支模型：GitHub Flow
 
@@ -120,8 +121,9 @@ app ──▶ feature:* ──▶ core:ui ──▶ (無)
 
 | 角色 | AI 模式下的職責 |
 |------|-----------------|
-| **A - Tech Lead** | **純協調**：需求確認 → 工作拆解與指派（R/A/I）→ 派工 → 審查 → merge `master`。**不撰寫 B/C 領域的產品程式碼** |
+| **A - Tech Lead** | **純協調**：需求確認 → 工作拆解與指派（R/A/I）→ 派工 → 審查 → merge `master`。**不撰寫 B/C/D 領域的產品程式碼** |
 | **B / C - subagent** | 開發＋自測＋依 DoD 回報（見下）；不做跨領域越界編輯 |
+| **D - QA subagent** | **獨立驗證**：單元測試執行、模擬器煙霧測試、logcat crash 監控、回歸報告；不修改任何產品程式碼，驗證 FAIL 退回 A 走同一套迴圈 |
 
 ### A 的治理例外（不算開發）
 
