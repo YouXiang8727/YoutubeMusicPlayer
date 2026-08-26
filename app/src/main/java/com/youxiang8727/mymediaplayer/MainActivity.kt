@@ -20,12 +20,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -96,9 +101,24 @@ fun MyApp() {
     val playerViewModel: PlayerViewModel = viewModel()
     val playback by playerViewModel.playback.collectAsState()
 
+    // 播放失敗的 App 內回饋（P1）：errorMessage 由 ExoPlayer 保留至下次 prepare()，
+    // 此處做 one-shot 顯示；錯誤清除（null）時重置去重鍵，同曲重試失敗仍會再次提示。
+    val snackbarHostState = remember { SnackbarHostState() }
+    var shownError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(playback.errorMessage) {
+        when (val message = playback.errorMessage) {
+            null -> shownError = null
+            else -> if (message != shownError) {
+                shownError = message
+                snackbarHostState.showSnackbar(message)
+            }
+        }
+    }
+
     val showBottomBar = currentRoute == Routes.SEARCH || currentRoute == Routes.PLAYLIST
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             Column {
                 AnimatedVisibility(visible = playback.hasCurrent) {

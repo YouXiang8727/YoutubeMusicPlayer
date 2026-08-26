@@ -25,5 +25,11 @@ data class PlaybackSnapshot(
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val shuffleEnabled: Boolean = false,
-    val repeatMode: RepeatMode = RepeatMode.ALL
+    val repeatMode: RepeatMode = RepeatMode.ALL,
+    /**
+     * 最近一次播放錯誤的可讀訊息（如「播放失敗：所有解析來源皆失敗[…]」）；
+     * null 表示目前無錯誤。供容器層顯示 snackbar／未來 UI 呈現。
+     * 錯誤由 ExoPlayer 保留至下次 prepare() 自動清除，此欄位隨之回到 null。
+     */
+    val errorMessage: String? = null
 )
