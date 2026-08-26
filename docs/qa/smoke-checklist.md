@@ -18,9 +18,10 @@
 | 9 | 佇列播放 | 從播放清單點一首中間的歌 | 通知 next 可跳到清單下一首 | ⚠️ 需人工 |
 | 10 | 播放清單 CRUD | 加入／移除／清空播放清單 | 列表即時更新、重啟 App 後保留 | ✅ adb |
 | 11 | crash 監控 | 全程 `logcat -d` 收尾 | 無 FATAL EXCEPTION、無 ANR 記錄 | ✅ adb |
+| 12 | 播放失敗 snackbar | 播放失敗情境（模擬器 IP 全封即固定重現；或實機斷網點卡片）下點擊結果卡片 | 數秒內底部出現 snackbar，以「播放失敗：」開頭並帶聚合原因；同一錯誤持續期間只彈一次（約 4 秒後消失不重彈）；再次點擊同曲重試失敗後 snackbar 應再次出現 | ✅ adb（截圖輪詢） |
 
 ## 已知問題登記
-<!-- 測試中發現但暫不修的問題，附 issue/PR 連結 -->
+<!-- 測試中發現但暫不修的問題，附 issue/PR 與報告連結 -->
 
-- **[P1] 串流解析失敗時 UI 零回饋**（2026-08-26，commit `0ae95d7`）：點擊卡片後若三層 fallback 全敗，無 MiniPlayerBar、無錯誤提示，使用者感知「點了沒反應」；錯誤僅存在 logcat。證據：`docs/qa/reports/2026-08-26-0ae95d7-smoke-direct-play-fallback.md` 問題清單 P1。待開發補 snackbar/toast＋重試入口。
-- **[E1] 模擬器環境無法驗證串流解析**（2026-08-26，commit `0ae95d7`）：模擬器 NAT 出口 IP（資料中心網段）遭 YouTube 全面 bot 封鎖，NewPipe／InnerTube IOS/ANDROID_VR 皆回 LOGIN_REQUIRED、Piped 回 HTTP 525。S1–S4 需實機＋非資料中心網路複測（操作指引見報告「需人工」節）。
+- **[P1] 串流解析失敗時 UI 零回饋**（2026-08-26，commit `0ae95d7`）——✅ **已修復結案**（commit `df10e5c`）：App 內 snackbar 顯示「播放失敗：」＋聚合原因，one-shot 不重彈、重試會再提示；複測 R1–R4 全 PASS，證據見 `docs/qa/reports/2026-08-26-df10e5c-smoke-playback-error-snackbar.md`。常規驗證項目已納入本清單 #12。
+- **[E1] 模擬器環境無法驗證串流解析**（2026-08-26，commit `0ae95d7`）——⏳ **仍開放**：模擬器 NAT 出口 IP（資料中心網段）遭 YouTube 全面 bot 封鎖，NewPipe／InnerTube IOS/ANDROID_VR 皆回 LOGIN_REQUIRED、Piped 回 HTTP 525。播放**成功**路徑（MiniPlayerBar、背景續播、切歌 TTL 快取、成功時不出現 snackbar）仍需實機＋非資料中心網路複測（操作指引見 `2026-08-26-0ae95d7-smoke-direct-play-fallback.md`「需人工」節與 `2026-08-26-df10e5c` 報告同節）。
