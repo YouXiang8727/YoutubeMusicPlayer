@@ -1,6 +1,7 @@
 package com.youxiang8727.mymediaplayer.core.data.remote.stream
 
 import com.youxiang8727.mymediaplayer.core.common.DispatcherProvider
+import com.youxiang8727.mymediaplayer.core.data.di.StreamProfile
 import com.youxiang8727.mymediaplayer.core.data.remote.OkHttpDownloader
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -18,12 +19,15 @@ private var extractorInitialized = false
 /**
  * 主路徑：NewPipe Extractor 解析（原 StreamResolver 邏輯遷入）。
  *
- * 注意：YouTube 對匿名 IP 啟用 bot 偵測（LOGIN_REQUIRED）時此路徑會失敗——
+ * 使用 [StreamProfile] 乾淨 client（無攔截器），讓 extractor 自帶的 UA 生效——
+ * 瀏覽器 header 覆蓋會導致 YouTube 回 LOGIN_REQUIRED。
+ *
+ * 注意：YouTube 對匿名 IP 啟用 bot 偵測（LOGIN_REQUIRED）時此路徑仍可能失敗——
  * v0.26.5（現行最新版）尚未內建繞道，由 FallbackStreamResolver 接手。
  */
 @Singleton
 class NewPipeStreamSource @Inject constructor(
-    okHttpClient: OkHttpClient,
+    @StreamProfile okHttpClient: OkHttpClient,
     private val dispatchers: DispatcherProvider
 ) : AudioStreamSource {
 

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.youxiang8727.mymediaplayer.core.common.DefaultDispatcherProvider
 import com.youxiang8727.mymediaplayer.core.common.DispatcherProvider
+import com.youxiang8727.mymediaplayer.core.data.di.StreamProfile
 import com.youxiang8727.mymediaplayer.core.data.local.AppDatabase
 import com.youxiang8727.mymediaplayer.core.data.local.PlaylistDao
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.AudioStreamSource
@@ -72,7 +73,7 @@ object StreamResolverModule {
     @Provides
     @Singleton
     fun provideStreamHttpTransport(
-        okHttpClient: OkHttpClient,
+        @StreamProfile okHttpClient: OkHttpClient,
         dispatchers: DispatcherProvider
     ): StreamHttpTransport = OkHttpStreamHttpTransport(okHttpClient, dispatchers)
 

@@ -53,7 +53,10 @@
   - `InnerTubeStreamSource`：直連 InnerTube player API（IOS → ANDROID_VR client，免 poToken；client 版本號為易腐常數）
   - `PipedStreamSource`：Piped 公開實例 `/streams/{id}`（最後手段）
 - `remote.stream.FallbackStreamResolver`：依序嘗試來源、成功結果 TTL 快取、經 `StreamErrorClassifier` 分類錯誤並聚合可讀訊息
-- `remote.OkHttpDownloader` / `NetworkModule`：共用 OkHttpClient（UA/Cookie 攔截器）；`stream.OkHttpStreamHttpTransport` 為 fallback 來源共用傳輸層
+- `remote.NetworkModule`：HTTP client 依用途拆雙 profile（Hilt qualifier 定義於 `di.HttpProfileQualifiers`）：
+  - `@BrowserProfile`：掛瀏覽器 UA／Referer／Cookie 攔截器（`YoutubeHeaderInterceptor`），僅供 Retrofit `YoutubeSearchApi` 抓行動版搜尋頁 HTML
+  - `@StreamProfile`：乾淨 client（僅逾時設定、無任何攔截器），串流解析鏈專用——NewPipe extractor 的 `remote.OkHttpDownloader`、InnerTube/Piped 的 `stream.OkHttpStreamHttpTransport`
+  - 教訓：瀏覽器 header 一旦覆蓋 InnerTube client 身份 UA 或 extractor 自帶 UA，串流解析即遭 LOGIN_REQUIRED，故兩 profile 嚴禁混用
 - `repository.*Impl`：實作 domain interface（Entity ↔ Domain mapping）
 - `di.DataModule`：Database / Dispatcher / Repository 三組綁定
 

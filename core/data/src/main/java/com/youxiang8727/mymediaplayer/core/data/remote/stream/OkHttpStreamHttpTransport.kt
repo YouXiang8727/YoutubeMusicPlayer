@@ -1,6 +1,7 @@
 package com.youxiang8727.mymediaplayer.core.data.remote.stream
 
 import com.youxiang8727.mymediaplayer.core.common.DispatcherProvider
+import com.youxiang8727.mymediaplayer.core.data.di.StreamProfile
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.withContext
@@ -9,10 +10,13 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
-/** [StreamHttpTransport] 的 OkHttp 實作：共用 NetworkModule 的 client（UA/逾時一致）。 */
+/**
+ * [StreamHttpTransport] 的 OkHttp 實作：使用 [StreamProfile] 乾淨 client（無任何攔截器），
+ * client 身份（UA 等）由各來源的請求 payload／headers 自帶，不被全域瀏覽器 header 覆蓋。
+ */
 @Singleton
 class OkHttpStreamHttpTransport @Inject constructor(
-    private val client: OkHttpClient,
+    @StreamProfile private val client: OkHttpClient,
     private val dispatchers: DispatcherProvider
 ) : StreamHttpTransport {
 

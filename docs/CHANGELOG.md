@@ -20,6 +20,7 @@
 - Media3 升級 1.5.1 → 1.11.0（exoplayer / session 統一）
 
 ### Fixed
+- 全域 OkHttpClient 掛載的瀏覽器 header 攔截器對所有請求無差別覆蓋 UA／Referer／Cookie，破壞 InnerTube IOS/ANDROID_VR 直連的 client 身份與 NewPipe extractor 自帶 UA，導致串流解析三層 fallback 全數被 YouTube 回 LOGIN_REQUIRED（IP 清白）：`NetworkModule` 拆為 browser／stream 雙 profile（Hilt qualifier `@BrowserProfile`／`@StreamProfile`），攔截器只保留在搜尋頁 HTML 抓取路徑，串流鏈改用無攔截器的乾淨 client
 - 補上 `MusicService` 的 `androidx.media3.session.MediaSessionService` intent-filter（media3 1.6+ 要求，否則 SessionToken 解析失敗導致 App 啟動即 crash）；Controller 連線初始化改為降級處理不炸 composition
 - 串流解析遭 YouTube 匿名 bot 封鎖（LOGIN_REQUIRED「Sign in to confirm you're not a bot」）時播放失敗：改多層 fallback——NewPipe 主路徑失敗後依序嘗試 InnerTube 直連（IOS → ANDROID_VR client，免 poToken）與 Piped 公開實例，成功結果以 TTL 快取；全鏈失敗時於媒體通知聚合各來源錯誤與分類提示
 - 播放解析失敗時錯誤訊息現在會反映至 App 內狀態（`PlaybackSnapshot.errorMessage`，供 UI 顯示）：`onPlayerError` 觸發快照重新取樣，映射規則抽成純 Kotlin 的 `PlaybackErrorDescriber`（cause chain 最深層的聚合中文訊息優先，否則以 errorCodeName 人類可讀化兜底）
