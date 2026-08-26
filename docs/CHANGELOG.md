@@ -3,7 +3,7 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)；
 版本語意參考 [Semantic Versioning](https://semver.org/lang/zh-TW/)。
 
-> **維護規則**：所有 merge 進 `main` 的 PR，必須在 `[Unreleased]` 區塊加一筆，
+> **維護規則**：所有 merge 進 `master` 的 PR，必須在 `[Unreleased]` 區塊加一筆，
 > 類別對應 Conventional Commits（`feat` → Added、`fix` → Fixed、`refactor`/`perf` → Changed、移除 → Removed、文件 → Docs）。
 > 發版時由 Tech Lead 把 `[Unreleased]` 改為版本號 + 日期。
 

@@ -8,31 +8,31 @@
 
 | 代號 | 角色 | 擁有目錄 | 禁區 | 兼職 |
 |------|------|----------|------|------|
-| **A - Tech Lead** | 架構守門人 | `settings.gradle.kts`、`gradle/libs.versions.toml`、根 `build.gradle.kts`、`core/common`、`core/domain`、`.github/`、`docs/` | — | 唯一可 merge `main`；版本升級統一 PR |
+| **A - Tech Lead** | 架構守門人 | `settings.gradle.kts`、`gradle/libs.versions.toml`、根 `build.gradle.kts`、`core/common`、`core/domain`、`.github/`、`docs/` | — | 唯一可 merge `master`；版本升級統一 PR |
 | **B - Data/Media Engineer** | 資料與播放 | `core/data/`、`feature/player/src/main/java/**/service/` | `feature/*/ui`、`core/ui` | NewPipe / StreamResolver 穩定度監控 |
 | **C - UI Engineer** | 前端介面 | `core/ui/`、`feature/search/`、`feature/playlist/`、`feature/player/` 的 Screen | `data/remote`、`data/local`（只能透過 `core:domain` 的 UseCase） | 輪值 QA |
 
 - **輪值 QA**：每兩週輪一人，負責補該 Sprint 功能的測試並跑實機煙霧測試。
-- **Owner（你）**：只看 `main` 的 CI 綠燈與 PR 列表，不參與程式碼審查細節。
+- **Owner（你）**：只看 `master` 的 CI 綠燈與 PR 列表，不參與程式碼審查細節。
 - **RACI**：做的人 = R；另兩人中指定一人 = A（PR Approver）；其餘 = I。跨層改動（例：改 domain interface）一律 A = Tech Lead。
 
 ## 2. 分支模型：GitHub Flow
 
 ```
-main（保護分支，唯一長期分支，永遠可發版）
+master（保護分支，唯一長期分支，永遠可發版）
   ↑ PR：1 Approve + CI 綠燈 → squash merge
 feature/<module>-<描述>     例：feature/search-history、fix/data-stream-resolver
 ```
 
 規則：
-1. 從最新 `main` 開分支，生命週期 ≤ 3 天，避免長期分歧。
+1. 從最新 `master` 開分支，生命週期 ≤ 3 天，避免長期分歧。
 2. 分支命名 `<type>/<scope>-<desc>`，`scope` = 你擁有的 module 名。
 3. Commit Message：Conventional Commits
    - `feat(search): 新增搜尋歷史`
    - `fix(data): 修復 ytInitialData 解析失敗`
    - `refactor(domain): 抽出 ClearPlaylistUseCase`
 4. PR 描述照 `.github/pull_request_template.md` 填寫。
-5. `main` 直接 push 一律禁止（Branch Protection 設定 Required）。
+5. `master` 直接 push 一律禁止（Branch Protection 設定 Required）。
 
 ## 3. Branch Protection 設定清單（Repo Settings → Branches）
 
@@ -76,7 +76,7 @@ app ──▶ feature:* ──▶ core:ui ──▶ (無)
 | 第三方庫新增/升級（`gradle/libs.versions.toml`） | `docs/ARCHITECTURE.md` 開頭 Stack 區、`docs/CHANGELOG.md` |
 | 新風險出現或對策變化 | `docs/ARCHITECTURE.md` §7 風險登記簿 |
 | 重大架構決策／取捨 | `docs/TEAM.md` §7 已知取捨 |
-| **所有 merge 進 `main` 的 PR（一律，無例外）** | `docs/CHANGELOG.md` 的 `[Unreleased]` 加一筆 |
+| **所有 merge 進 `master` 的 PR（一律，無例外）** | `docs/CHANGELOG.md` 的 `[Unreleased]` 加一筆 |
 
 - `docs/CHANGELOG.md` 採 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/) 格式；條目類別對應 Conventional Commits（`feat` → Added、`fix` → Fixed、`refactor`/`perf` → Changed、移除 → Removed）。
 - 發版時由 Tech Lead 將 `[Unreleased]` 改為版本號 + 日期。
