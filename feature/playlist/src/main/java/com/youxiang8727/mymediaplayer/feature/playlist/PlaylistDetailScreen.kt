@@ -15,9 +15,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,12 +47,14 @@ import coil.compose.AsyncImage
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
 
+/** 播放清單詳情頁（無狀態） */
 @Composable
-fun PlaylistScreen(
-    state: PlaylistUiState,
+fun PlaylistDetailScreen(
+    state: PlaylistDetailUiState,
     snackbarHostState: SnackbarHostState,
-    onIntent: (PlaylistIntent) -> Unit,
-    onOpenVideo: (PlaylistItem) -> Unit
+    onIntent: (PlaylistDetailIntent) -> Unit,
+    onOpenVideo: (PlaylistItem) -> Unit,
+    onBack: () -> Unit
 ) {
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         Column(
@@ -58,20 +63,43 @@ fun PlaylistScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp)
         ) {
+            // 頂部列：返回 + 標題
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                }
                 Text(
-                    text = "播放清單（${state.items.size}）",
+                    text = state.playlistName.ifBlank { "播放清單" },
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f)
                 )
                 if (state.items.isNotEmpty()) {
-                    TextButton(onClick = { onIntent(PlaylistIntent.ClearAll) }) {
+                    TextButton(onClick = { onIntent(PlaylistDetailIntent.ClearAll) }) {
                         Text("全部清除")
                     }
                 }
+            }
+
+            // 隨機播放按鈕
+            if (state.items.isNotEmpty()) {
+                FilledTonalButton(
+                    onClick = { onIntent(PlaylistDetailIntent.ShufflePlay) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        Icons.Filled.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        "隨機播放（${state.items.size} 首）",
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
             }
 
             when {
@@ -96,10 +124,10 @@ fun PlaylistScreen(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(state.items, key = { it.videoId }) { item ->
-                        PlaylistCard(
+                        PlaylistDetailCard(
                             item = item,
                             onClick = { onOpenVideo(item) },
-                            onRemove = { onIntent(PlaylistIntent.Remove(item.videoId)) }
+                            onRemove = { onIntent(PlaylistDetailIntent.Remove(item.videoId)) }
                         )
                     }
                     item { Spacer(Modifier.height(24.dp)) }
@@ -110,16 +138,20 @@ fun PlaylistScreen(
 }
 
 @Composable
-private fun PlaylistCard(
+private fun PlaylistDetailCard(
     item: PlaylistItem,
     onClick: () -> Unit,
     onRemove: () -> Unit
 ) {
-    Card(modifier = Modifier
-        .fillMaxWidth()
-        .clickable(onClick = onClick)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
     ) {
-        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             if (item.thumbnailUrl.isNotBlank()) {
                 AsyncImage(
                     model = item.thumbnailUrl,
@@ -162,10 +194,12 @@ private fun PlaylistCard(
     }
 }
 
+/** 播放清單詳情頁 Hilt 容器 */
 @Composable
-fun PlaylistRoute(
-    viewModel: PlaylistViewModel = hiltViewModel(),
-    onOpenVideo: (PlaylistItem) -> Unit
+fun PlaylistDetailRoute(
+    viewModel: PlaylistDetailViewModel = hiltViewModel(),
+    onOpenVideo: (PlaylistItem) -> Unit,
+    onBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -174,42 +208,64 @@ fun PlaylistRoute(
         viewModel.messages.collect { snackbarHostState.showSnackbar(it) }
     }
 
-    PlaylistScreen(
+    PlaylistDetailScreen(
         state = state,
         snackbarHostState = snackbarHostState,
         onIntent = viewModel::onIntent,
-        onOpenVideo = onOpenVideo
+        onOpenVideo = onOpenVideo,
+        onBack = onBack
     )
 }
 
-@Preview(showBackground = true, name = "Playlist - Empty")
+@Preview(showBackground = true, name = "PlaylistDetail - Empty")
 @Composable
-private fun PlaylistScreenEmptyPreview() {
+private fun PlaylistDetailScreenEmptyPreview() {
     MyMediaPlayerTheme {
-        PlaylistScreen(
-            state = PlaylistUiState(items = emptyList(), isLoading = false),
+        PlaylistDetailScreen(
+            state = PlaylistDetailUiState(
+                playlistId = 1,
+                playlistName = "我的最愛",
+                items = emptyList(),
+                isLoading = false
+            ),
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
-            onOpenVideo = {}
+            onOpenVideo = {},
+            onBack = {}
         )
     }
 }
 
-@Preview(showBackground = true, name = "Playlist - Items")
+@Preview(showBackground = true, name = "PlaylistDetail - Items")
 @Composable
-private fun PlaylistScreenItemsPreview() {
+private fun PlaylistDetailScreenItemsPreview() {
     MyMediaPlayerTheme {
-        PlaylistScreen(
-            state = PlaylistUiState(
+        PlaylistDetailScreen(
+            state = PlaylistDetailUiState(
+                playlistId = 1,
+                playlistName = "我的最愛",
                 isLoading = false,
                 items = listOf(
-                    PlaylistItem("dQw4w9WgXcQ", "晴天", "", "Jay Chou"),
-                    PlaylistItem("abc12345678", "夜曲 Live", "", "Official")
+                    PlaylistItem(
+                        videoId = "dQw4w9WgXcQ",
+                        title = "晴天",
+                        thumbnailUrl = "",
+                        channel = "Jay Chou",
+                        playlistId = 1
+                    ),
+                    PlaylistItem(
+                        videoId = "abc12345678",
+                        title = "夜曲 Live",
+                        thumbnailUrl = "",
+                        channel = "Official",
+                        playlistId = 1
+                    )
                 )
             ),
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
-            onOpenVideo = {}
+            onOpenVideo = {},
+            onBack = {}
         )
     }
 }

@@ -1,6 +1,7 @@
 package com.youxiang8727.mymediaplayer.feature.player.playback
 
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
+import com.youxiang8727.mymediaplayer.core.domain.model.RepeatMode
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

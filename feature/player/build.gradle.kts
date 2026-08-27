@@ -28,6 +28,7 @@ android {
 dependencies {
     implementation(project(":core:ui"))
     implementation(project(":core:domain"))
+    implementation(project(":feature:playlist"))
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)

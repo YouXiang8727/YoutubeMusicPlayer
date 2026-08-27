@@ -9,6 +9,9 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.youxiang8727.mymediaplayer.core.domain.model.PlaybackSnapshot
+import com.youxiang8727.mymediaplayer.core.domain.model.PlayerController
+import com.youxiang8727.mymediaplayer.core.domain.model.RepeatMode
 import com.youxiang8727.mymediaplayer.feature.player.service.MusicService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -23,8 +26,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 
@@ -147,9 +148,9 @@ class MediaControllerPlayerController @Inject constructor(
 
     override fun togglePlayPause() = withController { if (it.isPlaying) it.pause() else it.play() }
 
-    override fun seekToNext() = withController { if (it.hasNextMediaItem()) it.seekToNext() }
+    override fun seekToNext() = withController { it.seekToNext() }
 
-    override fun seekToPrevious() = withController { if (it.hasPreviousMediaItem()) it.seekToPrevious() }
+    override fun seekToPrevious() = withController { it.seekToPrevious() }
 
     override fun seekTo(positionMs: Long) = withController { it.seekTo(positionMs) }
 
