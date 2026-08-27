@@ -25,6 +25,81 @@ adb logcat -d -b crash
 adb logcat -d | grep -E "FATAL EXCEPTION|ANR in |AndroidRuntime"
 ```
 
+## 模擬器操控（ADB UI 自動化）
+
+### 基本互動命令
+
+```bash
+# 點擊座標 (x, y)
+adb shell input tap <x> <y>
+
+# 滑動 (x1, y1) → (x2, y2)，持續時間 ms
+adb shell input swipe <x1> <y1> <x2> <y2> <duration_ms>
+
+# 輸入文字（僅限英文數字）
+adb shell input text "hello"
+
+# 按鍵事件
+adb shell input keyevent <keycode>
+# 常用 keycode:
+#   3 = HOME, 4 = BACK, 26 = POWER, 82 = MENU
+#   24 = VOLUME_UP, 25 = VOLUME_DOWN
+#   187 = APP_SWITCH (最近使用的應用)
+
+# 長按 (x, y) 500ms
+adb shell input swipe <x> <y> <x> <y> 500
+```
+
+### 截圖與 UI Dump
+
+```bash
+# 截圖到本地
+adb shell screencap -p /sdcard/screenshot.png
+adb pull /sdcard/screenshot.png ./screenshot.png
+
+# Dump UI 結構（用於定位元素座標）
+adb shell uiautomator dump /sdcard/ui.xml
+adb pull /sdcard/ui.xml ./ui.xml
+# 解析 ui.xml 找到目標元素的 bounds 座標
+```
+
+### 常用測試座標（MyMediaPlayer App，1080x2400 螢幕）
+
+```
+# 底部 MiniPlayerBar 區域（約 y=2300）
+# 搜尋結果卡片（約 y=400~1200，依列表位置）
+# 隨機按鈕：MiniPlayerBar 左側 (x=100, y=2300)
+# 播放/暫停按鈕：MiniPlayerBar 中間 (x=540, y=2300)
+# 下一首按鈕：MiniPlayerBar 右側 (x=980, y=2300)
+```
+
+### 自動化測試腳本範例
+
+```bash
+# 1. 啟動 App
+adb shell am start -n com.youxiang8727.mymediaplayer/.MainActivity
+sleep 2
+
+# 2. 點擊搜尋欄位（假設在頂部 y=150）
+adb shell input tap 540 150
+sleep 1
+
+# 3. 輸入搜尋關鍵字
+adb shell input text "test"
+sleep 1
+
+# 4. 按鍵盤搜尋鍵
+adb shell input keyevent 66  # ENTER
+sleep 3
+
+# 5. 點擊第一個搜尋結果
+adb shell input tap 540 400
+sleep 2
+
+# 6. 檢查播放狀態
+adb shell dumpsys media_session | grep -A 5 "state="
+```
+
 ## 逐項驗證規則
 
 - 清單來源：`docs/qa/smoke-checklist.md`——**逐項執行，不抽樣**

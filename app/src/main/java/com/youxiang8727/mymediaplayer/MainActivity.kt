@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -45,17 +45,22 @@ import com.youxiang8727.mymediaplayer.feature.player.MiniPlayerBar
 import com.youxiang8727.mymediaplayer.feature.player.PlaybackIntent
 import com.youxiang8727.mymediaplayer.feature.player.PlayerRoute
 import com.youxiang8727.mymediaplayer.feature.player.PlayerViewModel
-import com.youxiang8727.mymediaplayer.feature.playlist.PlaylistRoute
+import com.youxiang8727.mymediaplayer.feature.playlist.PlaylistDetailRoute
+import com.youxiang8727.mymediaplayer.feature.playlist.PlaylistListRoute
 import com.youxiang8727.mymediaplayer.feature.search.SearchRoute
 import dagger.hilt.android.AndroidEntryPoint
 
 object Routes {
     const val SEARCH = "search"
-    const val PLAYLIST = "playlist"
+    const val PLAYLIST_LIST = "playlist_list"
+    const val PLAYLIST_DETAIL = "playlist_detail/{playlistId}?name={name}"
     const val PLAYER = "player/{videoId}?title={title}"
 
     fun player(videoId: String, title: String = "") =
         "player/$videoId?title=${android.net.Uri.encode(title)}"
+
+    fun playlistDetail(playlistId: Long, name: String = "") =
+        "playlist_detail/$playlistId?name=${android.net.Uri.encode(name)}"
 }
 
 @AndroidEntryPoint
@@ -115,7 +120,10 @@ fun MyApp() {
         }
     }
 
-    val showBottomBar = currentRoute == Routes.SEARCH || currentRoute == Routes.PLAYLIST
+    // 播放清單列表頁為頂層目的地之一，顯示底部導航列
+    val showBottomBar = currentRoute == Routes.SEARCH ||
+            currentRoute == Routes.PLAYLIST_LIST ||
+            currentRoute?.startsWith("playlist_detail") == true
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -151,15 +159,16 @@ fun MyApp() {
                             label = { Text("搜尋") }
                         )
                         NavigationBarItem(
-                            selected = currentRoute == Routes.PLAYLIST,
+                            selected = currentRoute == Routes.PLAYLIST_LIST ||
+                                    currentRoute?.startsWith("playlist_detail") == true,
                             onClick = {
-                                navController.navigate(Routes.PLAYLIST) {
+                                navController.navigate(Routes.PLAYLIST_LIST) {
                                     popUpTo(Routes.SEARCH) { saveState = true }
                                     launchSingleTop = true
                                     restoreState = true
                                 }
                             },
-                            icon = { Icon(Icons.Filled.List, contentDescription = null) },
+                            icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
                             label = { Text("播放清單") }
                         )
                     }
@@ -175,8 +184,6 @@ fun MyApp() {
                 .padding(padding),
             builder = {
                 composable(Routes.SEARCH) {
-                    // 點擊搜尋結果直接起播（不導航）：轉發給 activity-scoped PlayerViewModel，
-                    // 與 MiniPlayerBar 共用同一 MediaSession；App 退背景由 MusicService 前景服務接手。
                     SearchRoute(
                         onPlayVideo = { video ->
                             playerViewModel.onPlaybackIntent(
@@ -185,11 +192,28 @@ fun MyApp() {
                         }
                     )
                 }
-                composable(Routes.PLAYLIST) {
-                    PlaylistRoute(
+                composable(Routes.PLAYLIST_LIST) {
+                    PlaylistListRoute(
+                        onOpenPlaylist = { id, name ->
+                            navController.navigate(Routes.playlistDetail(id, name))
+                        }
+                    )
+                }
+                composable(
+                    route = Routes.PLAYLIST_DETAIL,
+                    arguments = listOf(
+                        navArgument("playlistId") { type = NavType.LongType },
+                        navArgument("name") {
+                            type = NavType.StringType
+                            defaultValue = ""
+                        }
+                    )
+                ) {
+                    PlaylistDetailRoute(
                         onOpenVideo = { item ->
                             navController.navigate(Routes.player(item.videoId, item.title))
-                        }
+                        },
+                        onBack = { navController.popBackStack() }
                     )
                 }
                 composable(

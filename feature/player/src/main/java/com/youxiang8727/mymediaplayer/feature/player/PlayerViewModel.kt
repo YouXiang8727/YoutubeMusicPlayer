@@ -3,15 +3,22 @@ package com.youxiang8727.mymediaplayer.feature.player
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.usecase.AddToPlaylistUseCase
-import com.youxiang8727.mymediaplayer.feature.player.playback.PlayerController
+import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
+import com.youxiang8727.mymediaplayer.core.domain.model.PlayerController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 data class PlayerUiState(
@@ -40,7 +47,9 @@ sealed interface PlaybackIntent {
 class PlayerViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val addToPlaylist: AddToPlaylistUseCase,
-    private val playerController: PlayerController
+    private val createPlaylist: CreatePlaylistUseCase,
+    private val playerController: PlayerController,
+    observePlaylists: ObservePlaylistsUseCase
 ) : ViewModel() {
 
     val state: PlayerUiState = PlayerUiState(
@@ -49,11 +58,20 @@ class PlayerViewModel @Inject constructor(
     )
 
     /** 來自 MediaSession 的即時播放狀態（MiniPlayerBar 與通知共用同一狀態源）。 */
-    val playback: StateFlow<com.youxiang8727.mymediaplayer.feature.player.playback.PlaybackSnapshot> =
+    val playback: StateFlow<com.youxiang8727.mymediaplayer.core.domain.model.PlaybackSnapshot> =
         playerController.playback
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val messages: SharedFlow<String> = _messages.asSharedFlow()
+
+    private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
+    val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
+
+    init {
+        observePlaylists()
+            .onEach { list -> _playlists.value = list }
+            .launchIn(viewModelScope)
+    }
 
     fun startBackgroundPlayback() {
         playerController.play(state.videoId, state.title.ifBlank { state.videoId })
@@ -78,11 +96,22 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    fun onAddToPlaylist(item: PlaylistItem) {
+    fun onAddToPlaylist(playlistId: Long, item: PlaylistItem) {
         viewModelScope.launch {
-            runCatching { addToPlaylist(item) }
+            runCatching { addToPlaylist(playlistId, item) }
                 .onSuccess { _messages.tryEmit("已加入播放清單") }
                 .onFailure { _messages.tryEmit("加入失敗：${it.message}") }
+        }
+    }
+
+    fun createPlaylistAndAdd(name: String, item: PlaylistItem) {
+        viewModelScope.launch {
+            runCatching {
+                val newId = createPlaylist(name)
+                addToPlaylist(newId, item.copy(playlistId = newId))
+            }
+                .onSuccess { _messages.tryEmit("已建立「$name」並加入歌曲") }
+                .onFailure { _messages.tryEmit("建立失敗：${it.message}") }
         }
     }
 }

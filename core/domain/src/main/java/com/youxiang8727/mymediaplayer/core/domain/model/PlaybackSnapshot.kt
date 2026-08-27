@@ -1,4 +1,4 @@
-package com.youxiang8727.mymediaplayer.feature.player.playback
+package com.youxiang8727.mymediaplayer.core.domain.model
 
 /**
  * 播放模式（需求：單曲循環 / 清單循環兩種，不含「不循環」）。

@@ -24,7 +24,10 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -33,18 +36,27 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
+import com.youxiang8727.mymediaplayer.feature.playlist.CreatePlaylistDialog
+import com.youxiang8727.mymediaplayer.feature.playlist.PlaylistPickerSheet
 
 @Composable
 fun PlayerScreen(
     state: PlayerUiState,
+    playlists: List<Playlist>,
     snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
     onStartBackground: () -> Unit,
     onStopBackground: () -> Unit,
-    onAddToPlaylist: () -> Unit
+    onAddToPlaylist: (playlistId: Long) -> Unit,
+    onCreatePlaylistAndAdd: (name: String) -> Unit
 ) {
+    var showPicker by remember { mutableStateOf(false) }
+    var showCreateDialog by remember { mutableStateOf(false) }
+
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         Column(
             modifier = Modifier
@@ -68,7 +80,7 @@ fun PlayerScreen(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = onAddToPlaylist) {
+                IconButton(onClick = { showPicker = true }) {
                     Icon(Icons.Filled.Add, contentDescription = "加入播放清單")
                 }
             }
@@ -118,6 +130,30 @@ fun PlayerScreen(
             )
         }
     }
+
+    // 播放清單選擇 BottomSheet
+    if (showPicker) {
+        PlaylistPickerSheet(
+            playlists = playlists,
+            onPlaylistSelected = { playlistId ->
+                onAddToPlaylist(playlistId)
+                showPicker = false
+            },
+            onCreateNew = { showCreateDialog = true },
+            onDismiss = { showPicker = false }
+        )
+    }
+
+    // 建立新播放清單 Dialog
+    if (showCreateDialog) {
+        CreatePlaylistDialog(
+            onConfirm = { name ->
+                onCreatePlaylistAndAdd(name)
+                showCreateDialog = false
+            },
+            onDismiss = { showCreateDialog = false }
+        )
+    }
 }
 
 @Composable
@@ -126,6 +162,7 @@ fun PlayerRoute(
     onBack: () -> Unit
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
+    val playlists by viewModel.playlists.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         viewModel.messages.collect { snackbarHostState.showSnackbar(it) }
@@ -134,16 +171,30 @@ fun PlayerRoute(
     val state = viewModel.state
     PlayerScreen(
         state = state,
+        playlists = playlists,
         snackbarHostState = snackbarHostState,
         onBack = onBack,
         onStartBackground = viewModel::startBackgroundPlayback,
         onStopBackground = viewModel::stopBackgroundPlayback,
-        onAddToPlaylist = {
+        onAddToPlaylist = { playlistId ->
             viewModel.onAddToPlaylist(
+                playlistId,
                 PlaylistItem(
                     videoId = state.videoId,
                     title = state.title.ifBlank { state.videoId },
-                    thumbnailUrl = ""
+                    thumbnailUrl = "",
+                    playlistId = playlistId
+                )
+            )
+        },
+        onCreatePlaylistAndAdd = { name ->
+            viewModel.createPlaylistAndAdd(
+                name,
+                PlaylistItem(
+                    videoId = state.videoId,
+                    title = state.title.ifBlank { state.videoId },
+                    thumbnailUrl = "",
+                    playlistId = 0L // will be replaced in ViewModel
                 )
             )
         }
@@ -156,11 +207,16 @@ private fun PlayerScreenPreview() {
     MyMediaPlayerTheme {
         PlayerScreen(
             state = PlayerUiState(videoId = "dQw4w9WgXcQ", title = "晴天"),
+            playlists = listOf(
+                Playlist(id = 1, name = "我的最愛"),
+                Playlist(id = 2, name = "工作播放清單")
+            ),
             snackbarHostState = remember { SnackbarHostState() },
             onBack = {},
             onStartBackground = {},
             onStopBackground = {},
-            onAddToPlaylist = {}
+            onAddToPlaylist = {},
+            onCreatePlaylistAndAdd = { _ -> }
         )
     }
 }

@@ -9,11 +9,11 @@
 
 ```
 :app                 # 容器：Application、MainActivity、Navigation 圖、Manifest 聚合
-├─ feature:search    # 搜尋頁（Screen + ViewModel）
-├─ feature:playlist  # 播放清單頁
-├─ feature:player    # 播放頁 + MusicService（前景服務、背景音訊）
+├─ feature:search    # 搜尋頁（Screen + ViewModel）→ 依賴 feature:playlist（PlaylistPickerSheet）
+├─ feature:playlist  # 播放清單（列表頁 + 詳情頁 + 共用 BottomSheet/Dialog）
+├─ feature:player    # 播放頁 + MusicService（前景服務、背景音訊）→ 依賴 feature:playlist
 ├─ core:ui           # Material Theme、共用樣式（未來放共用 Composable）
-├─ core:domain       # 純 Kotlin：Model、Repository interface、UseCase（零 Android 依賴）
+├─ core:domain       # 純 Kotlin：Model、Repository interface、UseCase、PlayerController 介面（零 Android 依賴）
 ├─ core:data         # Room、Retrofit/OkHttp、NewPipe 解析、Repository 實作、Hilt DataModule
 └─ core:common       # DispatcherProvider 等跨層小工具（純 Kotlin）
 ```
@@ -21,11 +21,11 @@
 ## 2. 依賴規則（單向，物理強制）
 
 ```
-:app ──▶ :feature:search
-    └──▶ :feature:playlist        :feature:* ──▶ :core:ui
-    └──▶ :feature:player                        :feature:* ──▶ :core:domain
-                                                 :core:data  ──▶ :core:common
-             :core:domain ◀──────────────────── :core:data
+:app ──▶ :feature:search ──▶ :feature:playlist
+    └──▶ :feature:player  ──▶ :feature:playlist     :feature:* ──▶ :core:ui
+    └──▶ :feature:playlist                          :feature:* ──▶ :core:domain
+                                                     :core:data  ──▶ :core:common
+             :core:domain ◀──────────────────────── :core:data
              （data 實作 domain 的 interface）
 ```
 
@@ -38,14 +38,16 @@
 ## 3. 各層職責與關鍵類別
 
 ### core:domain（純 Kotlin）
-- `core.domain.model.VideoResult` / `PlaylistItem`：領域模型（無 Room/序列化標註）
+- `core.domain.model.VideoResult` / `Playlist` / `PlaylistItem`：領域模型（無 Room/序列化標註）
+- `core.domain.model.PlayerController`：播放控制介面（跨 feature 共用合約），ViewModel 只注入此介面
+- `core.domain.model.PlaybackSnapshot` / `RepeatMode`：播放狀態快照與循環模式枚舉
 - `core.domain.repository.VideoRepository` / `PlaylistRepository`：interface
-- `core.domain.usecase.*`：SearchVideos、ObservePlaylist、AddToPlaylist、RemoveFromPlaylist、ClearPlaylist
+- `core.domain.usecase.*`：SearchVideos、CreatePlaylist、RenamePlaylist、DeletePlaylist、ObservePlaylists、ObservePlaylistItems、AddToPlaylist、RemoveFromPlaylist、ClearPlaylist、ShufflePlayPlaylist
 - 測試：`src/test/` 純 JVM 單元測試（Fake Repository）
 
 ### core:data
-- `local.PlaylistItemEntity`：Room Entity（持久化細節，不外洩）；與 Domain Model 互轉的 mapper 在同檔
-- `local.AppDatabase` / `PlaylistDao`：Room
+- `local.PlaylistEntity` / `PlaylistItemEntity`：Room Entity（持久化細節，不外洩）；與 Domain Model 互轉的 mapper 在同檔
+- `local.AppDatabase` / `PlaylistDao`：Room（`PlaylistDao` 含播放清單 CRUD、項目觀察、隨機取曲、級聯刪除）
 - `remote.YoutubeSearchApi`：Retrofit（行動版搜尋頁 HTML）
 - `remote.YoutubeDataSource`：解析 `ytInitialData` JSON → List&lt;VideoResult&gt;
 - `remote.stream.AudioStreamSource`：串流解析來源抽象（data 層內部型別），三個實作依優先序組成 fallback 鏈：
@@ -65,8 +67,7 @@
 
 ### feature:search | playlist | player
 - `*Route`（Hilt 容器）→ `*Screen`（無狀態 Composable）＋ `*ViewModel`（StateFlow + Intent）
-- `feature.player.playback.PlayerController`：播放控制介面（命令 + `StateFlow<PlaybackSnapshot>`），
-  ViewModel 只注入此介面；實作 `MediaControllerPlayerController` 以 MediaController 連線至 MediaSession
+- `feature:playlist` 提供共用 `PlaylistPickerSheet`（BottomSheet）與 `CreatePlaylistDialog`，供 search/player 共用（故 search/player 依賴 playlist）
 - `feature.player.MiniPlayerBar`：前景常駐迷你播放列（隨機／前後曲／循環／歌名／進度條），由 app 層掛載於底部
 - `feature.player.service.MusicService`：Media3 `MediaSessionService`
   - 播放佇列：點播曲目在播放清單中 → 整份清單從該曲起播；否則單曲（`playback.PlaybackQueueBuilder` 純函數，有單元測試）
@@ -76,6 +77,7 @@
 
 ### :app
 - `Routes` + NavHost；bottom bar（搜尋 / 播放清單）
+- 播放清單導航：`playlist_list`（列表頁）→ `playlist_detail/{playlistId}`（詳情頁，含隨機播放）
 - 權限宣告、Application (`@HiltAndroidApp`)
 
 ## 4. 資料流
@@ -86,7 +88,8 @@ UI Intent ──▶ ViewModel.onIntent ──▶ UseCase ──▶ Repository(in
    UiState ◀── StateFlow ◀── ViewModel ◀── Flow ◀──┤
                                                     ├─▶ Room（playlist 表）
                                                     └─▶ Retrofit/NewPipe（YouTube）
-播放：PlayerViewModel ──▶ PlayerController ──▶ MediaController ──▶ MusicService(MediaSession) ──▶ ExoPlayer
+播放：PlayerViewModel ──▶ PlayerController(core:domain) ──▶ MediaController ──▶ MusicService(MediaSession) ──▶ ExoPlayer
+      （PlayerController 介面在 core:domain，實作 MediaControllerPlayerController 在 feature:player）
       （前景 MiniPlayerBar 與背景通知共用同一 MediaSession 狀態源）
 ```
 

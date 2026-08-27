@@ -1,9 +1,9 @@
-package com.youxiang8727.mymediaplayer.feature.player.playback
+package com.youxiang8727.mymediaplayer.core.domain.model
 
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * 播放控制的 feature 內部介面。
+ * 播放控制的跨 feature 共用介面。
  * ViewModel 只依賴此介面（不碰 MediaController/ExoPlayer/Service），便於測試替換；
  * 實作以 MediaController 連線至 MusicService 的 MediaSession。
  */

@@ -8,9 +8,10 @@ data class VideoResult(
     val channel: String = ""
 )
 
-fun VideoResult.toPlaylistItem() = PlaylistItem(
+fun VideoResult.toPlaylistItem(playlistId: Long = 0L) = PlaylistItem(
     videoId = videoId,
     title = title,
     thumbnailUrl = thumbnailUrl,
-    channel = channel
+    channel = channel,
+    playlistId = playlistId
 )
