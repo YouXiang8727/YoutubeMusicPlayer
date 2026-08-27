@@ -55,21 +55,6 @@ class MusicService : MediaSessionService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    private val customLayout: ImmutableList<CommandButton> by lazy {
-        ImmutableList.of(
-            CommandButton.Builder()
-                .setDisplayName("隨機播放")
-                .setIconResId(R.drawable.ic_shuffle)
-                .setSessionCommand(SessionCommand(COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
-                .build(),
-            CommandButton.Builder()
-                .setDisplayName("循環模式（清單／單曲）")
-                .setIconResId(R.drawable.ic_repeat)
-                .setSessionCommand(SessionCommand(COMMAND_CYCLE_REPEAT, Bundle.EMPTY))
-                .build()
-        )
-    }
-
     override fun onCreate() {
         super.onCreate()
 
@@ -78,6 +63,7 @@ class MusicService : MediaSessionService() {
                 DefaultMediaSourceFactory(resolvingDataSourceFactory())
             )
             .build()
+        newPlayer.repeatMode = Player.REPEAT_MODE_ALL
         player = newPlayer
         mediaSession = MediaSession.Builder(this, newPlayer)
             .setCallback(sessionCallback)
@@ -90,6 +76,26 @@ class MusicService : MediaSessionService() {
                 .build()
                 .apply { setSmallIcon(R.drawable.ic_music_notification) }
         )
+
+        // 監聽播放模式變更，重新設定通知列 custom layout（icon 隨狀態切換）
+        newPlayer.addListener(object : Player.Listener {
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                refreshNotificationCustomLayout()
+            }
+            override fun onRepeatModeChanged(repeatMode: Int) {
+                refreshNotificationCustomLayout()
+            }
+        })
+    }
+
+    /** 重新設定通知列 custom layout，使 icon 反映最新播放模式。 */
+    private fun refreshNotificationCustomLayout() {
+        val session = mediaSession ?: return
+        // 取目前所有已連線的 controller，逐一重新設定
+        for (i in 0 until session.connectedControllers.size) {
+            val controller = session.connectedControllers[i]
+            session.setCustomLayout(controller, buildCustomLayout(session))
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
@@ -112,11 +118,29 @@ class MusicService : MediaSessionService() {
     /** 載入佇列並從點播的曲目開始播放。 */
     private fun handlePlay(videoId: String, title: String) {
         serviceScope.launch {
-            val playlistItems = playlistRepository.observeAll().first()
+            // 找出包含該 videoId 的播放清單，以其項目建構佇列
+            val playlists = playlistRepository.observeAllPlaylists().first()
+            var playlistItems = emptyList<com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem>()
+            for (playlist in playlists) {
+                val items = playlistRepository.observePlaylistItems(playlist.id).first()
+                if (items.any { it.videoId == videoId }) {
+                    playlistItems = items
+                    break
+                }
+            }
             val queue = PlaybackQueueBuilder.build(playlistItems, videoId, title)
             player?.apply {
+                // Save current playback modes before setting new items
+                val currentShuffleMode = shuffleModeEnabled
+                val currentRepeatMode = repeatMode
+
                 setMediaItems(queue.entries.map { it.toMediaItem() })
                 seekTo(queue.startIndex, 0L)
+
+                // Re-apply playback modes after setting new items
+                shuffleModeEnabled = currentShuffleMode
+                repeatMode = currentRepeatMode
+
                 prepare()
                 playWhenReady = true
             }
@@ -144,7 +168,7 @@ class MusicService : MediaSessionService() {
 
         /** 通知列上的隨機／循環按鈕（custom layout 於連線後掛載）。 */
         override fun onPostConnect(session: MediaSession, controller: MediaSession.ControllerInfo) {
-            session.setCustomLayout(controller, customLayout)
+            session.setCustomLayout(controller, buildCustomLayout(session))
         }
 
         override fun onCustomCommand(
@@ -165,6 +189,32 @@ class MusicService : MediaSessionService() {
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
+    }
+
+    /**
+     * 依目前播放模式動態選 icon 的 custom layout：
+     * - 隨機：已啟用 → ic_shuffle_active / 未啟用 → ic_shuffle
+     * - 循環：ALL → ic_repeat / ONE → ic_repeat_one
+     */
+    private fun buildCustomLayout(session: MediaSession): ImmutableList<CommandButton> {
+        val p = player
+        val shuffleIcon = if (p?.shuffleModeEnabled == true) R.drawable.ic_shuffle_active else R.drawable.ic_shuffle
+        val repeatIcon = when (p?.repeatMode) {
+            Player.REPEAT_MODE_ONE -> R.drawable.ic_repeat_one
+            else -> R.drawable.ic_repeat
+        }
+        return ImmutableList.of(
+            CommandButton.Builder()
+                .setDisplayName("隨機播放")
+                .setIconResId(shuffleIcon)
+                .setSessionCommand(SessionCommand(COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
+                .build(),
+            CommandButton.Builder()
+                .setDisplayName("循環模式（清單／單曲）")
+                .setIconResId(repeatIcon)
+                .setSessionCommand(SessionCommand(COMMAND_CYCLE_REPEAT, Bundle.EMPTY))
+                .build()
+        )
     }
 
     // endregion
