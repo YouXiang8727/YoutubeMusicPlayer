@@ -26,12 +26,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
-import com.youxiang8727.mymediaplayer.feature.player.playback.PlaybackSnapshot
-import com.youxiang8727.mymediaplayer.feature.player.playback.RepeatMode
+import com.youxiang8727.mymediaplayer.core.domain.model.PlaybackSnapshot
+import com.youxiang8727.mymediaplayer.core.domain.model.RepeatMode
 
 /**
  * 常駐底部的迷你播放控制列（App 前景時）。
@@ -48,6 +50,14 @@ fun MiniPlayerBar(
     onSeek: (positionMs: Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    var toastRef by remember { mutableStateOf<Toast?>(null) }
+
+    fun showToast(message: String) {
+        toastRef?.cancel()
+        toastRef = Toast.makeText(context, message, Toast.LENGTH_SHORT).also { it.show() }
+    }
+
     Surface(
         modifier = modifier.fillMaxWidth(),
         tonalElevation = 3.dp
@@ -64,11 +74,17 @@ fun MiniPlayerBar(
                 )
 
                 IconButton(
-                    onClick = onToggleShuffle,
+                    onClick = {
+                        val willEnable = !snapshot.shuffleEnabled
+                        onToggleShuffle()
+                        showToast(if (willEnable) "隨機播放：開啟" else "隨機播放：關閉")
+                    },
                     modifier = Modifier.size(40.dp)
                 ) {
                     Icon(
-                        painter = painterResource(R.drawable.ic_shuffle),
+                        painter = painterResource(
+                            if (snapshot.shuffleEnabled) R.drawable.ic_shuffle_active else R.drawable.ic_shuffle
+                        ),
                         contentDescription = if (snapshot.shuffleEnabled) "關閉隨機播放" else "開啟隨機播放",
                         tint = if (snapshot.shuffleEnabled) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant
@@ -99,7 +115,12 @@ fun MiniPlayerBar(
                 }
 
                 IconButton(
-                    onClick = onCycleRepeat,
+                    onClick = {
+                        val nextMode = snapshot.repeatMode.next()
+                        onCycleRepeat()
+                        val label = if (nextMode == RepeatMode.ONE) "單曲循環" else "清單循環"
+                        showToast("循環模式：$label")
+                    },
                     modifier = Modifier.size(40.dp)
                 ) {
                     val repeatOne = snapshot.repeatMode == RepeatMode.ONE
