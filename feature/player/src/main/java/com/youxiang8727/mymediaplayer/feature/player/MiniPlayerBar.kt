@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.unit.dp
 import android.widget.Toast
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
@@ -183,7 +184,24 @@ internal fun formatTime(ms: Long): String {
 
 // region Previews
 
-@Preview(showBackground = true, name = "MiniPlayer - 播放中")
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-player",
+    name = "MiniPlayerBar - Playing - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-player",
+    name = "MiniPlayerBar - Playing - Light"
+)
 @Composable
 private fun MiniPlayerBarPlayingPreview() {
     MyMediaPlayerTheme {
@@ -204,7 +222,24 @@ private fun MiniPlayerBarPlayingPreview() {
     }
 }
 
-@Preview(showBackground = true, name = "MiniPlayer - 單曲循環＋隨機＋暫停")
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-player",
+    name = "MiniPlayerBar - Paused Shuffle RepeatOne - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-player",
+    name = "MiniPlayerBar - Paused Shuffle RepeatOne - Light"
+)
 @Composable
 private fun MiniPlayerBarPausedPreview() {
     MyMediaPlayerTheme {

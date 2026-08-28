@@ -36,6 +36,8 @@ dependencies {
 
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.compose.material.icons)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    debugImplementation(libs.androidx.compose.ui.tooling)
 
     // Media3 / ExoPlayer（背景音訊）+ MediaSession（通知/鎖屏/藍牙控制）
     implementation(libs.androidx.media3.exoplayer)

@@ -22,18 +22,22 @@
 - `PlayerController` 介面與 `PlaybackSnapshot` 資料類別移至 `core:domain`，作為跨 feature 共用播放控制合約
 
 ### Changed
+- **App 主題色系全面重設計**：深色模式為主採用中性深灰/黑背景 (#121212) + 紅/橙系強調色 (#FF3B30)，參考 YouTube Music / Spotify 風格；淺色模式對應乾淨白/淺灰背景；保留 Android 12+ 動態配色支援
+- 色彩命名語意化：移除 `Purple80` 等實作命名，改用 Material 3 標準角色（`Primary`、`OnPrimary`、`Surface`、`SurfaceVariant`、`SurfaceContainer` 等 20+ 語意色），完整支援 M3 色彩系統
+- Typography 完整覆寫：`displayLarge/Small`、`headlineLarge/Medium/Small`、`titleLarge/Medium/Small`、`bodyLarge/Medium/Small`、`labelLarge/Medium/Small` 皆依 Material 3 規範設定字重/大小/行高，字體採系統預設 `FontFamily.Default`
+- 通知圖示統一白色：`ic_music_notification`、`ic_shuffle_active` 等 9 個 drawable 全改為 `#FFFFFFFF`，確保深色通知背景下可見度
 - MusicService 由手刻 Foreground Service 重構為 Media3 `MediaSessionService`；前景 UI 與背景通知共用同一狀態源
 - Media3 升級 1.5.1 → 1.11.0（exoplayer / session 統一）
 
 ### Fixed
-- MiniPlayerBar 隨機播放圖示切換：啟用時改用 `ic_shuffle_active` 圖示（與 MusicService 通知列一致），而非僅改變 tint 顏色
-- 播放新歌時隨機／循環模式被重置：`MusicService.handlePlay()` 於 `setMediaItems()` 後重新套用當前 `shuffleModeEnabled` 與 `repeatMode`，確保「下一首」按鈕依循正確播放模式
-- 循環模式預設值修正：ExoPlayer 預設 `repeatMode` 改為 `REPEAT_MODE_ALL`（清單循環），與 UI 圖示一致；原預設 `REPEAT_MODE_OFF` 被映射為 `ALL` 導致 UI 顯示循環但實際播放完畢停止
-- MiniPlayerBar 隨機播放與循環模式切換時顯示 Toast 回饋，並以單一 Toast reference + `cancel()` 避免頻繁切換時 Toast 堆疊
-- 全域 OkHttpClient 掛載的瀏覽器 header 攔截器對所有請求無差別覆蓋 UA／Referer／Cookie，破壞 InnerTube IOS/ANDROID_VR 直連的 client 身份與 NewPipe extractor 自帶 UA，導致串流解析三層 fallback 全數被 YouTube 回 LOGIN_REQUIRED（IP 清白）：`NetworkModule` 拆為 browser／stream 雙 profile（Hilt qualifier `@BrowserProfile`／`@StreamProfile`），攔截器只保留在搜尋頁 HTML 抓取路徑，串流鏈改用無攔截器的乾淨 client
-- 補上 `MusicService` 的 `androidx.media3.session.MediaSessionService` intent-filter（media3 1.6+ 要求，否則 SessionToken 解析失敗導致 App 啟動即 crash）；Controller 連線初始化改為降級處理不炸 composition
-- 串流解析遭 YouTube 匿名 bot 封鎖（LOGIN_REQUIRED「Sign in to confirm you're not a bot」）時播放失敗：改多層 fallback——NewPipe 主路徑失敗後依序嘗試 InnerTube 直連（IOS → ANDROID_VR client，免 poToken）與 Piped 公開實例，成功結果以 TTL 快取；全鏈失敗時於媒體通知聚合各來源錯誤與分類提示
-- 播放解析失敗時錯誤訊息現在會反映至 App 內狀態（`PlaybackSnapshot.errorMessage`，供 UI 顯示）：`onPlayerError` 觸發快照重新取樣，映射規則抽成純 Kotlin 的 `PlaybackErrorDescriber`（cause chain 最深層的聚合中文訊息優先，否則以 errorCodeName 人類可讀化兜底）
+- **降級 Compose BOM 至 `2025.01.00` (Compose 1.7.6)**，解決 Android Studio 253.32098.37 Preview `ClassNotFoundException: ComposeViewAdapter` 問題：新版 BOM (2026.02.01 → Compose 1.10.4) 超出 AS 設計工具插件支援範圍，降級後 Preview 可正常載入
+- 修復所有 Compose Preview 渲染問題：
+  - `PlayerScreen`：Preview 中以 `LocalInspectionMode.current` 判斷設計時期，以黑色 Box 替代 WebView 避免渲染異常
+  - `PlaylistPickerSheet`：兩組 Preview（含項目／空清單）皆能正常顯示
+  - 全模組 Preview 統一補齊參數：深/淺色模式（`uiMode`）、繁體中文（`locale=zh_TW`）、字體縮放 1.0、Pixel 7 Pro 裝置、分組名稱（`feature-player`/`feature-search`/`feature-playlist`）、具名 Preview
+  - `PlaylistListScreen`：日期格式化移除 `Locale.getDefault()` 依賴，改用 `LocalConfiguration.current.locales` 固定 Preview 語系
+- **feature:player / feature:playlist / feature:search / core:ui**：新增 `debugImplementation(libs.androidx.compose.ui.tooling)`（core:ui 用 `debugApi` 向下傳遞），修復 Preview 無法渲染的 `ClassNotFoundException: ComposeViewAdapter` 核心問題 —— `ui-tooling-preview` 僅含註解 API，實際渲染需 `ui-tooling` runtime
+- `PlaylistDetailScreen`：AsyncImage 補上 `placeholder` / `error` 使用 `MaterialTheme.colorScheme.surfaceVariant`，空縮圖顯示主題色塊；佔位 Box 同步改用 `surfaceVariant` 取代硬編碼 `Color.LightGray`，統一 Preview 與運行時視覺
 
 ### Removed
 - 移除 legacy `androidx.media` 依賴（通知改由 Media3 session 提供）

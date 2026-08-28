@@ -36,10 +36,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -54,14 +55,14 @@ fun PlaylistDetailScreen(
     snackbarHostState: SnackbarHostState,
     onIntent: (PlaylistDetailIntent) -> Unit,
     onOpenVideo: (PlaylistItem) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
 ) {
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = 16.dp),
         ) {
             // 頂部列：返回 + 標題
             Row(
@@ -126,9 +127,10 @@ fun PlaylistDetailScreen(
                     items(state.items, key = { it.videoId }) { item ->
                         PlaylistDetailCard(
                             item = item,
-                            onClick = { onOpenVideo(item) },
-                            onRemove = { onIntent(PlaylistDetailIntent.Remove(item.videoId)) }
-                        )
+                            onClick = { onOpenVideo(item) }
+                        ) {
+                            onIntent(PlaylistDetailIntent.Remove(item.videoId))
+                        }
                     }
                     item { Spacer(Modifier.height(24.dp)) }
                 }
@@ -159,14 +161,17 @@ private fun PlaylistDetailCard(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .size(96.dp, 54.dp)
-                        .clip(MaterialTheme.shapes.small)
+                        .clip(MaterialTheme.shapes.small),
+                    // 使用 placeholder 提升預覽與載入時的體驗
+                    placeholder = ColorPainter(MaterialTheme.colorScheme.surfaceVariant),
+                    error = ColorPainter(MaterialTheme.colorScheme.surfaceVariant)
                 )
             } else {
                 Box(
                     modifier = Modifier
                         .size(96.dp, 54.dp)
                         .clip(MaterialTheme.shapes.small)
-                        .background(Color.LightGray)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
                 )
             }
             Spacer(Modifier.size(12.dp))
@@ -199,7 +204,7 @@ private fun PlaylistDetailCard(
 fun PlaylistDetailRoute(
     viewModel: PlaylistDetailViewModel = hiltViewModel(),
     onOpenVideo: (PlaylistItem) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -217,7 +222,24 @@ fun PlaylistDetailRoute(
     )
 }
 
-@Preview(showBackground = true, name = "PlaylistDetail - Empty")
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistDetailScreen - Empty - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistDetailScreen - Empty - Light"
+)
 @Composable
 private fun PlaylistDetailScreenEmptyPreview() {
     MyMediaPlayerTheme {
@@ -230,13 +252,31 @@ private fun PlaylistDetailScreenEmptyPreview() {
             ),
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
-            onOpenVideo = {},
-            onBack = {}
-        )
+            onOpenVideo = {}
+        ) {
+            // onBack
+        }
     }
 }
 
-@Preview(showBackground = true, name = "PlaylistDetail - Items")
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistDetailScreen - Items - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistDetailScreen - Items - Light"
+)
 @Composable
 private fun PlaylistDetailScreenItemsPreview() {
     MyMediaPlayerTheme {
@@ -264,8 +304,9 @@ private fun PlaylistDetailScreenItemsPreview() {
             ),
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
-            onOpenVideo = {},
-            onBack = {}
-        )
+            onOpenVideo = {}
+        ) {
+            // onBack
+        }
     }
 }

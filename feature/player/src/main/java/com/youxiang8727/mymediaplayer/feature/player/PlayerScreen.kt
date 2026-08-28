@@ -3,6 +3,7 @@ package com.youxiang8727.mymediaplayer.feature.player
 import android.webkit.WebView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,8 +32,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -86,22 +89,32 @@ fun PlayerScreen(
             }
 
             // 影片區（WebView 嵌入 YouTube 播放器）
-            AndroidView(
-                factory = { context ->
-                    WebView(context).apply {
-                        settings.javaScriptEnabled = true
-                        settings.mediaPlaybackRequiresUserGesture = false
-                        loadUrl("https://www.youtube.com/embed/${state.videoId}?autoplay=1")
-                    }
-                },
-                update = { webView ->
-                    webView.loadUrl("https://www.youtube.com/embed/${state.videoId}?autoplay=1")
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(230.dp)
-                    .background(Color.Black)
-            )
+            val isInPreview = LocalInspectionMode.current
+            if (isInPreview) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(230.dp)
+                        .background(Color.Black)
+                )
+            } else {
+                AndroidView(
+                    factory = { context ->
+                        WebView(context).apply {
+                            settings.javaScriptEnabled = true
+                            settings.mediaPlaybackRequiresUserGesture = false
+                            loadUrl("https://www.youtube.com/embed/${state.videoId}?autoplay=1")
+                        }
+                    },
+                    update = { webView ->
+                        webView.loadUrl("https://www.youtube.com/embed/${state.videoId}?autoplay=1")
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(230.dp)
+                        .background(Color.Black)
+                )
+            }
 
             Spacer(Modifier.height(16.dp))
 
@@ -201,7 +214,24 @@ fun PlayerRoute(
     )
 }
 
-@Preview(showBackground = true, name = "Player")
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-player",
+    name = "PlayerScreen - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-player",
+    name = "PlayerScreen - Light"
+)
 @Composable
 private fun PlayerScreenPreview() {
     MyMediaPlayerTheme {
