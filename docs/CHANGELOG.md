@@ -10,6 +10,8 @@
 ## [Unreleased]
 
 ### Added
+- 搜尋結果「載入更多」：`feature:search` 新增 `SearchIntent.LoadMore`、`LoadMoreFooter`（僅在 `nextPageToken != null` 顯示，載入中 disabled＋小進度）；ViewModel 以 continuation token 併頁 append（去重）、空頁視為「已無更多」、token 過期失敗保留原結果可重試；新增 `SearchViewModelTest`（9 案例，純 JVM）
+- 搜尋分頁資料鏈：新增 `VideoSearchPage(results, nextPageToken)` 領域模型；`VideoRepository.search` / `SearchVideosUseCase` 支援 `continuationToken` 透傳；`YoutubeDataSource` 解析 `continuationItemRenderer` token（internal 純函數可測）並移除每頁 30 筆硬上限
 - 搜尋列表點擊影片改為直接播放（不進入播放頁）：新增 `PlaybackIntent.Play`，由 app 層將搜尋 callback 橋接至播放控制
 - 前景迷你播放列（MiniPlayerBar）：App 開啟時常駐底部，含隨機播放開關、上一首／下一首、單曲／清單循環切換、曲目名稱與可拖曳進度條
 - 背景通知播放控制：Media3 MediaSession 通知含歌名、進度條（seek）、播放/暫停/前後曲，並新增隨機與循環按鈕
@@ -30,6 +32,7 @@
 - Media3 升級 1.5.1 → 1.11.0（exoplayer / session 統一）
 
 ### Fixed
+- **修復搜尋「載入更多」輪迴**：根因為 GET `results?continuation=` 會回傳**整頁重新排序**（與前頁重疊 55~100%）。改為續頁走 innerTube `POST youtubei/v1/search`（MWEB context，append-only chunk，重疊 0%；續頁 renderer 為 `videoWithContextRenderer`，欄位對應與首頁不同故新增獨立解析路徑）。ViewModel 補跨頁去重（防 `LazyColumn` duplicate-key 崩潰）與「token 未推進視為到底」guard。新增 `SearchPaging` log（每頁 SUMMARY＋DETAIL 全量 videoId:title＋token 未推進 WARN），供實機驗證續頁正確性
 - **降級 Compose BOM 至 `2025.01.00` (Compose 1.7.6)**，解決 Android Studio 253.32098.37 Preview `ClassNotFoundException: ComposeViewAdapter` 問題：新版 BOM (2026.02.01 → Compose 1.10.4) 超出 AS 設計工具插件支援範圍，降級後 Preview 可正常載入
 - 修復所有 Compose Preview 渲染問題：
   - `PlayerScreen`：Preview 中以 `LocalInspectionMode.current` 判斷設計時期，以黑色 Box 替代 WebView 避免渲染異常
