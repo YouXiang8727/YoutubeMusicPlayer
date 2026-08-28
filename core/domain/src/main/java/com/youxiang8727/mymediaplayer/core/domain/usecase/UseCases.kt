@@ -2,7 +2,7 @@ package com.youxiang8727.mymediaplayer.core.domain.usecase
 
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
-import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
+import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.VideoRepository
 import kotlinx.coroutines.flow.Flow
@@ -11,8 +11,15 @@ import javax.inject.Inject
 class SearchVideosUseCase @Inject constructor(
     private val repository: VideoRepository
 ) {
-    suspend operator fun invoke(query: String): Result<List<VideoResult>> =
-        repository.search(query.trim())
+    /**
+     * 初次搜尋或載入下一頁。
+     * @param continuationToken null = 初次搜尋；非 null = 以該 token 載入續頁。
+     *                           token 為機密性字串，不做 trim、原樣傳遞。
+     */
+    suspend operator fun invoke(
+        query: String,
+        continuationToken: String? = null
+    ): Result<VideoSearchPage> = repository.search(query.trim(), continuationToken)
 }
 
 class CreatePlaylistUseCase @Inject constructor(
