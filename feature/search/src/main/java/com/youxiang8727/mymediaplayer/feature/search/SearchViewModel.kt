@@ -8,6 +8,7 @@ import com.youxiang8727.mymediaplayer.core.domain.usecase.AddToPlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchVideosUseCase
+import android.util.Log
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -27,6 +28,8 @@ data class SearchUiState(
     val query: String = "",
     val isLoading: Boolean = false,
     val results: List<VideoResult> = emptyList(),
+    val nextPageToken: String? = null,
+    val isLoadingMore: Boolean = false,
     val error: String? = null,
     val searched: Boolean = false
 )
@@ -34,6 +37,7 @@ data class SearchUiState(
 sealed interface SearchIntent {
     data class QueryChanged(val value: String) : SearchIntent
     data object Search : SearchIntent
+    data object LoadMore : SearchIntent
     data class AddToPlaylist(val video: VideoResult, val playlistId: Long) : SearchIntent
 }
 
@@ -64,6 +68,7 @@ class SearchViewModel @Inject constructor(
         when (intent) {
             is SearchIntent.QueryChanged -> _state.update { it.copy(query = intent.value) }
             SearchIntent.Search -> doSearch()
+            SearchIntent.LoadMore -> loadMore()
             is SearchIntent.AddToPlaylist -> addVideoToPlaylist(
                 intent.video.toPlaylistItem(intent.playlistId),
                 intent.playlistId
@@ -74,18 +79,97 @@ class SearchViewModel @Inject constructor(
     private fun doSearch() {
         val query = _state.value.query.trim()
         if (query.isEmpty()) return
-        _state.update { it.copy(isLoading = true, error = null, searched = true) }
+        _state.update { it.copy(isLoading = true, isLoadingMore = false, error = null, searched = true) }
         viewModelScope.launch {
             searchVideos(query)
-                .onSuccess { list ->
+                .onSuccess { page ->
                     _state.update {
-                        it.copy(isLoading = false, results = list)
+                        it.copy(
+                            isLoading = false,
+                            results = page.results,
+                            nextPageToken = page.nextPageToken,
+                            error = null
+                        )
                     }
-                    if (list.isEmpty()) _messages.tryEmit("查無結果")
+                    if (page.results.isEmpty()) _messages.tryEmit("查無結果")
                 }
                 .onFailure { e ->
-                    _state.update { it.copy(isLoading = false, error = e.message) }
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            nextPageToken = null,
+                            error = e.message
+                        )
+                    }
                     _messages.tryEmit("搜尋失敗：${e.message ?: "未知錯誤"}")
+                }
+        }
+    }
+
+    private fun loadMore() {
+        val current = _state.value
+        // 重入 guard：初次搜尋中或已在載入更多時忽略
+        if (current.isLoading || current.isLoadingMore) return
+        val token = current.nextPageToken ?: return
+        val query = current.query.trim()
+        if (query.isEmpty()) return
+
+        _state.update { it.copy(isLoadingMore = true, error = null) }
+        viewModelScope.launch {
+            searchVideos(query, token)
+                .onSuccess { page ->
+                    // append 去重：保留首次出現、維持既有順序。
+                    // 深頁（結果池枯竭）可能跨頁重複 videoId，若不去重會讓
+                    // LazyColumn(key = { it.videoId }) 因 duplicate key 拋
+                    // IllegalArgumentException 而崩潰；去重同時避免視覺重複。
+                    val existing = _state.value.results
+                    val existingIds = existing.mapTo(HashSet()) { it.videoId }
+                    var appended = 0
+                    var duplicated = 0
+                    val merged = buildList {
+                        addAll(existing)
+                        for (video in page.results) {
+                            if (existingIds.add(video.videoId)) {
+                                add(video)
+                                appended++
+                            } else {
+                                duplicated++
+                            }
+                        }
+                    }
+
+                    // 「token 未推進 → 視為到底」guard：若 data 層回傳的下一頁
+                    // token 與本次 sent 的 token 相同（YT 回聲續頁），表示沒有真正
+                    // 前進，中斷潛在輪迴並視為已到底，避免 UI 死循環。
+                    val reachedEnd = page.nextPageToken != null &&
+                        page.nextPageToken == token
+
+                    val nextToken = if (reachedEnd) null else page.nextPageToken
+
+                    _state.update {
+                        it.copy(
+                            isLoadingMore = false,
+                            results = merged,
+                            nextPageToken = nextToken
+                        )
+                    }
+
+                    Log.i(
+                        "SearchPaging",
+                        "APPEND q=$query fetched=${page.results.size} " +
+                            "appended=$appended dup=$duplicated " +
+                            "next=${nextToken?.take(12) ?: ">"}"
+                    )
+
+                    // 載入更多回空頁 / token 未推進：視為已到底，UI 呈現「已無更多」
+                    if (page.results.isEmpty() || reachedEnd) {
+                        _messages.tryEmit("已無更多結果")
+                    }
+                }
+                .onFailure { e ->
+                    // 失敗不破壞既有結果，保留現有 nextPageToken 供使用者重試
+                    _state.update { it.copy(isLoadingMore = false, error = e.message) }
+                    _messages.tryEmit("載入更多失敗：${e.message ?: "未知錯誤"}")
                 }
         }
     }

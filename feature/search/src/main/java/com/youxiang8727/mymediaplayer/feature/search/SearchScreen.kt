@@ -119,6 +119,13 @@ fun SearchScreen(
                             onAdd = { showPickerVideo = video }
                         )
                     }
+                    item {
+                        LoadMoreFooter(
+                            nextPageToken = state.nextPageToken,
+                            isLoadingMore = state.isLoadingMore,
+                            onLoadMore = { onIntent(SearchIntent.LoadMore) }
+                        )
+                    }
                     item { Spacer(Modifier.height(24.dp)) }
                 }
             }
@@ -218,6 +225,43 @@ private fun VideoCard(
     }
 }
 
+/**
+ * LazyColumn 底部的「載入更多」footer。
+ * 僅在仍有下一頁（nextPageToken != null）時顯示；載入中時 disabled 並顯示小型進度。
+ */
+@Composable
+internal fun LoadMoreFooter(
+    nextPageToken: String?,
+    isLoadingMore: Boolean,
+    onLoadMore: () -> Unit
+) {
+    if (nextPageToken == null) {
+        // 已到底：留出底部空間給 Spacer
+        return
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Button(
+            onClick = onLoadMore,
+            enabled = !isLoadingMore
+        ) {
+            if (isLoadingMore) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+                Spacer(Modifier.size(8.dp))
+            }
+            Text(if (isLoadingMore) "載入中…" else "載入更多")
+        }
+    }
+}
+
 /** Hilt 容器：收集狀態與一次性訊息。 */
 @Composable
 fun SearchRoute(
@@ -307,6 +351,91 @@ private fun SearchScreenResultsPreview() {
             playlists = listOf(
                 Playlist(id = 1, name = "我的最愛"),
                 Playlist(id = 2, name = "工作播放清單")
+            ),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {},
+            onPlayVideo = {},
+            onCreatePlaylistAndAdd = { _, _ -> }
+        )
+    }
+}
+
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Results with LoadMore - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Results with LoadMore - Light"
+)
+@Composable
+private fun SearchScreenResultsLoadMorePreview() {
+    MyMediaPlayerTheme {
+        SearchScreen(
+            state = SearchUiState(
+                query = "周杰倫",
+                results = listOf(
+                    VideoResult("dQw4w9WgXcQ", "晴天", "", "Jay Chou"),
+                    VideoResult("abc12345678", "夜曲 Live", "", "Official")
+                ),
+                nextPageToken = "continuation-token-1",
+                searched = true
+            ),
+            playlists = listOf(
+                Playlist(id = 1, name = "我的最愛")
+            ),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {},
+            onPlayVideo = {},
+            onCreatePlaylistAndAdd = { _, _ -> }
+        )
+    }
+}
+
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Results LoadingMore - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Results LoadingMore - Light"
+)
+@Composable
+private fun SearchScreenResultsLoadingMorePreview() {
+    MyMediaPlayerTheme {
+        SearchScreen(
+            state = SearchUiState(
+                query = "周杰倫",
+                results = listOf(
+                    VideoResult("dQw4w9WgXcQ", "晴天", "", "Jay Chou"),
+                    VideoResult("abc12345678", "夜曲 Live", "", "Official")
+                ),
+                nextPageToken = "continuation-token-1",
+                isLoadingMore = true,
+                searched = true
+            ),
+            playlists = listOf(
+                Playlist(id = 1, name = "我的最愛")
             ),
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},

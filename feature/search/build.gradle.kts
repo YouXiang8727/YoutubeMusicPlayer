@@ -23,6 +23,12 @@ android {
     buildFeatures {
         compose = true
     }
+
+    testOptions {
+        // SearchViewModel 使用 android.util.Log（SearchPaging append log），
+        // 純 JVM 測試需回傳預設值避免 "not mocked" 例外（測試組態，非新增依賴）。
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -40,4 +46,7 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.androidx.compose.material.icons)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
