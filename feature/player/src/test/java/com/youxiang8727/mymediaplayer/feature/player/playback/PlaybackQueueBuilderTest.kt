@@ -8,9 +8,9 @@ import org.junit.Test
 class PlaybackQueueBuilderTest {
 
     private val playlist = listOf(
-        PlaylistItem(videoId = "aaa", title = "晴天", thumbnailUrl = ""),
-        PlaylistItem(videoId = "bbb", title = "七里香", thumbnailUrl = ""),
-        PlaylistItem(videoId = "ccc", title = "擱淺", thumbnailUrl = "")
+        PlaylistItem(videoId = "aaa", title = "晴天", thumbnailUrl = "", playlistId = 0L),
+        PlaylistItem(videoId = "bbb", title = "七里香", thumbnailUrl = "", playlistId = 0L),
+        PlaylistItem(videoId = "ccc", title = "擱淺", thumbnailUrl = "", playlistId = 0L)
     )
 
     @Test
