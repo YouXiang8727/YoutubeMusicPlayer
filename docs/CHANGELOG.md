@@ -39,6 +39,14 @@
 - **feature:player / feature:playlist / feature:search / core:ui**：新增 `debugImplementation(libs.androidx.compose.ui.tooling)`（core:ui 用 `debugApi` 向下傳遞），修復 Preview 無法渲染的 `ClassNotFoundException: ComposeViewAdapter` 核心問題 —— `ui-tooling-preview` 僅含註解 API，實際渲染需 `ui-tooling` runtime
 - `PlaylistDetailScreen`：AsyncImage 補上 `placeholder` / `error` 使用 `MaterialTheme.colorScheme.surfaceVariant`，空縮圖顯示主題色塊；佔位 Box 同步改用 `surfaceVariant` 取代硬編碼 `Color.LightGray`，統一 Preview 與運行時視覺
 
+### Fixed
+- **fix(data): 更新 InnerTube client 版本號並支援 visitorData 降低 bot 封鎖率**
+  - IOS client：`20.49.6 → 21.26.4`、iPhone17,2 → iPhone16,2、iOS 18.4.1 → 18.3.2（同步 yt-dlp 2026.08.19）
+  - ANDROID_VR client：`1.71.26 → 1.65.10`、Android 12 → 12L（同步 yt-dlp 2026.08.19）
+  - 新增 `VisitorDataFetcher` 介面與 `OkHttpVisitorDataFetcher` 實作：GET www.youtube.com 解析 `ytcfg.set('VISITOR_DATA', ...)`，快取 24 小時，注入 `context.user.visitorData` 並帶上 Cookie；失敗只記 warning 不阻斷主流程
+  - Piped 備援實例更新：`pipedapi.kavin.rocks` → `pipedapi.syncpundit.io` → `api-piped.mha.fi`（優先有 CDN、支援 audio/mp4、亞洲延遲低的實例）
+  - 重構 InnerTubeStreamSource 注入 `VisitorDataFetcher` 介面，提升可測性
+
 ### Removed
 - 移除 legacy `androidx.media` 依賴（通知改由 Media3 session 提供）
 

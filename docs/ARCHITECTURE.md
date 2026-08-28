@@ -49,11 +49,11 @@
 - `local.PlaylistEntity` / `PlaylistItemEntity`：Room Entity（持久化細節，不外洩）；與 Domain Model 互轉的 mapper 在同檔
 - `local.AppDatabase` / `PlaylistDao`：Room（`PlaylistDao` 含播放清單 CRUD、項目觀察、隨機取曲、級聯刪除）
 - `remote.YoutubeSearchApi`：Retrofit（行動版搜尋頁 HTML）
-- `remote.YoutubeDataSource`：解析 `ytInitialData` JSON → List&lt;VideoResult&gt;
+- `remote.YoutubeDataSource`：解析 `ytInitialData` JSON → List<VideoResult>
 - `remote.stream.AudioStreamSource`：串流解析來源抽象（data 層內部型別），三個實作依優先序組成 fallback 鏈：
   - `NewPipeStreamSource`（主路徑）：NewPipe Extractor
-  - `InnerTubeStreamSource`：直連 InnerTube player API（IOS → ANDROID_VR client，免 poToken；client 版本號為易腐常數）
-  - `PipedStreamSource`：Piped 公開實例 `/streams/{id}`（最後手段）
+  - `InnerTubeStreamSource`：直連 InnerTube player API（IOS → ANDROID_VR client，免 poToken；client 版本號為易腐常數，**2026-08 同步 yt-dlp 2026.08.19：IOS 21.26.4 / ANDROID_VR 1.65.10**；新增 **visitorData 支援**：GET www.youtube.com 解析 ytcfg 並注入 `context.user.visitorData`，快取 24 小時，失敗不阻斷主流程）
+  - `PipedStreamSource`：Piped 公開實例 `/streams/{id}`（最後手段，**2026-08 更新備援實例：kavin.rocks → syncpundit.io → mha.fi**）
 - `remote.stream.FallbackStreamResolver`：依序嘗試來源、成功結果 TTL 快取、經 `StreamErrorClassifier` 分類錯誤並聚合可讀訊息
 - `remote.NetworkModule`：HTTP client 依用途拆雙 profile（Hilt qualifier 定義於 `di.HttpProfileQualifiers`）：
   - `@BrowserProfile`：掛瀏覽器 UA／Referer／Cookie 攔截器（`YoutubeHeaderInterceptor`），僅供 Retrofit `YoutubeSearchApi` 抓行動版搜尋頁 HTML

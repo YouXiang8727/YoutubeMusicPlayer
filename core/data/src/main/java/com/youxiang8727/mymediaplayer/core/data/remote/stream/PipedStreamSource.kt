@@ -13,6 +13,9 @@ import kotlinx.serialization.json.JsonPrimitive
  * 已知限制（2026 現況）：公開實例的 IP 常遭 YouTube 封鎖、過載頻繁，
  * 「works until it doesn't」——只當 NewPipe 與 InnerTube 都失效時的最後手段，
  * 其串流 URL 亦經實例代理（頻寬走第三方）。實例失效時更換 [DEFAULT_API_BASE]。
+ *
+ * 2026-08 更新：優先選擇有 CDN、支援 audio/mp4、亞洲/台灣延遲低的實例。
+ * 參考：TeamPiped/Piped Wiki Instances、piped.status 監控頁。
  */
 @Singleton
 class PipedStreamSource @Inject constructor(
@@ -22,11 +25,23 @@ class PipedStreamSource @Inject constructor(
     override val name: String = "Piped"
 
     override suspend fun fetch(videoId: String): Result<String> = runCatching {
-        val response = transport.execute(
-            StreamHttpRequest(url = "$DEFAULT_API_BASE/streams/$videoId")
-        )
-        if (response.code != 200) throw IOException("HTTP ${response.code}（實例可能過載或被封鎖）")
-        parseAudioUrl(response.body ?: throw IOException("回應為空內容"))
+        // 嘗試主實例，失效時輪換備援
+        val instances = listOf(DEFAULT_API_BASE, FALLBACK_INSTANCE_1, FALLBACK_INSTANCE_2)
+        var lastError: Throwable? = null
+        for (base in instances) {
+            try {
+                val response = transport.execute(
+                    StreamHttpRequest(url = "$base/streams/$videoId")
+                )
+                if (response.code == 200) {
+                    return@runCatching parseAudioUrl(response.body ?: throw IOException("回應為空內容"))
+                }
+                lastError = IOException("HTTP ${response.code}（實例可能過載或被封鎖）")
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        throw lastError ?: IOException("所有 Piped 實例皆失敗")
     }
 
     internal fun parseAudioUrl(body: String): String {
@@ -48,7 +63,11 @@ class PipedStreamSource @Inject constructor(
     }
 
     companion object {
-        /** Piped 官方主要 API 實例；失效時改用 TeamPiped/Piped wiki Instances 清單上的健康實例。 */
+        /** Piped 官方主要 API 實例（有 CDN、多地區含台灣/亞洲）；失效時改用備援。 */
         const val DEFAULT_API_BASE = "https://pipedapi.kavin.rocks"
+        /** 備援 1：syncpundit.io（有 CDN、US/India/UK/Japan 節點、支援 audio/mp4） */
+        const val FALLBACK_INSTANCE_1 = "https://pipedapi.syncpundit.io"
+        /** 備援 2：mha.fi（有 CDN、Finland 節點、支援 audio/mp4） */
+        const val FALLBACK_INSTANCE_2 = "https://api-piped.mha.fi"
     }
 }

@@ -1,8 +1,13 @@
 package com.youxiang8727.mymediaplayer.core.data.remote.stream
 
+import android.util.Log
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -19,11 +24,17 @@ import kotlinx.serialization.json.put
  * plain（未加密）的 adaptiveFormats URL。client 版本號屬「易腐常數」，
  * 失效時優先懷疑版本被 YouTube 淘汰 → 更新 [IOS]／[ANDROID_VR] 的版本與 UA。
  *
+ * 2026-08 新增：所有 client（含 IOS/ANDROID_VR）在高風險 IP 需送 visitorData。
+ * 實作：GET www.youtube.com 解析 ytcfg.set('VISITOR_DATA', '...')，快取 24 小時，
+ * 注入 context.user.visitorData 並帶上 Cookie VISITOR_DATA/VISITOR_INFO1_LIVE。
+ * 失敗時只記 warning 不阻斷主流程。
+ *
  * 嘗試順序：IOS → ANDROID_VR（ANDROID client 已於 2026 年初被 YouTube 淘汰，不採用）。
  */
 @Singleton
 class InnerTubeStreamSource @Inject constructor(
-    private val transport: StreamHttpTransport
+    private val transport: StreamHttpTransport,
+    private val visitorDataFetcher: VisitorDataFetcher
 ) : AudioStreamSource {
 
     override val name: String = "InnerTube"
@@ -37,6 +48,9 @@ class InnerTubeStreamSource @Inject constructor(
 
     private val profiles = listOf(IOS, ANDROID_VR)
 
+    /** visitorData 快取：key = clientProfile.id，value = Pair(visitorData, cookieHeader) */
+    private val visitorDataCache = ConcurrentHashMap<String, Pair<String, String>>()
+
     override suspend fun fetch(videoId: String): Result<String> {
         val failures = mutableListOf<String>()
         for (profile in profiles) {
@@ -49,6 +63,9 @@ class InnerTubeStreamSource @Inject constructor(
 
     private suspend fun fetchWith(profile: ClientProfile, videoId: String): Result<String> =
         runCatching {
+            val visitorData = visitorDataFetcher.fetchVisitorData(profile.userAgent, profile.id)
+            val (cookieHeader, body) = buildRequestBody(profile, videoId, visitorData)
+
             val response = transport.execute(
                 StreamHttpRequest(
                     url = PLAYER_ENDPOINT,
@@ -57,19 +74,39 @@ class InnerTubeStreamSource @Inject constructor(
                         "Content-Type" to "application/json",
                         "User-Agent" to profile.userAgent,
                         "X-YouTube-Client-Name" to profile.clientIndexHeader,
-                        "X-YouTube-Client-Version" to (profile.contextClient["clientVersion"] as JsonPrimitive).content
+                        "X-YouTube-Client-Version" to (profile.contextClient["clientVersion"] as JsonPrimitive).content,
+                        "Cookie" to cookieHeader
                     ),
-                    body = buildJsonObject {
-                        put("context", buildJsonObject { put("client", profile.contextClient) })
-                        put("videoId", videoId)
-                        put("contentCheckOk", true)
-                        put("racyCheckOk", true)
-                    }.toString()
+                    body = body
                 )
             )
             if (response.code != 200) throw IOException("HTTP ${response.code}")
             response.body?.takeIf { it.isNotBlank() } ?: throw IOException("回應為空內容")
         }.mapCatching { body -> parseAudioUrl(body) }
+
+    /** 建構請求 body 並注入 visitorData；回傳 Pair(cookieHeader, jsonBody) */
+    private fun buildRequestBody(profile: ClientProfile, videoId: String, visitorData: String): Pair<String, String> {
+        val clientJson = buildJsonObject {
+            // 手動複製 profile.contextClient 的所有屬性（kotlinx.serialization 無 putAll）
+            profile.contextClient.forEach { (key, value) -> put(key, value) }
+            if (visitorData.isNotBlank()) {
+                put("visitorData", visitorData)
+            }
+        }
+        val body = buildJsonObject {
+            put("context", buildJsonObject {
+                put("client", clientJson)
+                if (visitorData.isNotBlank()) {
+                    put("user", buildJsonObject { put("visitorData", visitorData) })
+                }
+            })
+            put("videoId", videoId)
+            put("contentCheckOk", true)
+            put("racyCheckOk", true)
+        }.toString()
+        val cookieHeader = visitorDataCache[profile.id]?.second ?: ""
+        return cookieHeader to body
+    }
 
     /** 解析 player 回應：playabilityStatus 需 OK，取 audio/mp4 中位元率最高者的 plain URL。 */
     internal fun parseAudioUrl(body: String): String {
@@ -125,36 +162,41 @@ class InnerTubeStreamSource @Inject constructor(
         /**
          * IOS client：免 poToken、免 API key（以 UA + clientVersion 驗證）。
          * 版本易腐：失效時對照 yt-dlp / NewPipeExtractor 最新使用的 iOS 版本號更新。
+         * 2026-08-19 同步 yt-dlp 2026.08.19：clientVersion 21.26.4, iPhone16,2, iOS 18.3.2
          */
         val IOS = ClientProfile(
             id = "IOS",
-            userAgent = "com.google.ios.youtube/20.49.6 (iPhone17,2; U; CPU iOS 18_4_1 like Mac OS X)",
+            userAgent = "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
             clientIndexHeader = "5",
             contextClient = buildJsonObject {
                 put("clientName", "IOS")
-                put("clientVersion", "20.49.6")
+                put("clientVersion", "21.26.4")
                 put("deviceMake", "Apple")
-                put("deviceModel", "iPhone17,2")
-                put("osName", "iOS")
-                put("osVersion", "18.4.1.22E219")
+                put("deviceModel", "iPhone16,2")
+                put("osName", "iPhone")
+                put("osVersion", "18.3.2.22D82")
                 put("hl", "zh-TW")
                 put("gl", "TW")
             }
         )
 
-        /** ANDROID_VR client：免 poToken、免 JS 簽章、plain URL。 */
+        /** ANDROID_VR client：免 poToken、免 JS 簽章、plain URL。
+         *  2026-08-19 同步 yt-dlp 2026.08.19：clientVersion 1.65.10, Quest 3, Android 12L
+         *  注意：yt-dlp 2026.08.17 後 ALL formats 含 HLS 都需 PO token，
+         *  但我們只取 adaptiveFormats 中的 plain URL (audio/mp4)，暫時仍可用。
+         */
         val ANDROID_VR = ClientProfile(
             id = "ANDROID_VR",
-            userAgent = "com.google.android.apps.youtube.vr.oculus/1.71.26 " +
-                "(Linux; U; Android 12; US; Quest 3 Build/SQ3A.220605.009.A1) gzip",
+            userAgent = "com.google.android.apps.youtube.vr.oculus/1.65.10 " +
+                "(Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
             clientIndexHeader = "28",
             contextClient = buildJsonObject {
                 put("clientName", "ANDROID_VR")
-                put("clientVersion", "1.71.26")
+                put("clientVersion", "1.65.10")
                 put("deviceMake", "Oculus")
                 put("deviceModel", "Quest 3")
                 put("osName", "Android")
-                put("osVersion", "12")
+                put("osVersion", "12L")
                 put("androidSdkVersion", 32)
                 put("hl", "zh-TW")
                 put("gl", "TW")

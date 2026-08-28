@@ -12,10 +12,12 @@ import com.youxiang8727.mymediaplayer.core.data.remote.stream.FallbackStreamReso
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.InnerTubeStreamSource
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.NewPipeStreamSource
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.OkHttpStreamHttpTransport
+import com.youxiang8727.mymediaplayer.core.data.remote.stream.OkHttpVisitorDataFetcher
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.PipedStreamSource
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.StreamClock
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.StreamErrorClassifier
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.StreamHttpTransport
+import com.youxiang8727.mymediaplayer.core.data.remote.stream.VisitorDataFetcher
 import com.youxiang8727.mymediaplayer.core.data.repository.AudioStreamRepositoryImpl
 import com.youxiang8727.mymediaplayer.core.data.repository.PlaylistRepositoryImpl
 import com.youxiang8727.mymediaplayer.core.data.repository.VideoRepositoryImpl
@@ -77,6 +79,13 @@ object StreamResolverModule {
         @StreamProfile okHttpClient: OkHttpClient,
         dispatchers: DispatcherProvider
     ): StreamHttpTransport = OkHttpStreamHttpTransport(okHttpClient, dispatchers)
+
+    @Provides
+    @Singleton
+    fun provideVisitorDataFetcher(
+        @StreamProfile okHttpClient: OkHttpClient,
+        dispatchers: DispatcherProvider
+    ): VisitorDataFetcher = OkHttpVisitorDataFetcher(dispatchers.io, okHttpClient)
 
     @Provides
     @Singleton
