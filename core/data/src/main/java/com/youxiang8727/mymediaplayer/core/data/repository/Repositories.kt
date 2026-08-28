@@ -8,7 +8,7 @@ import com.youxiang8727.mymediaplayer.core.data.remote.YoutubeDataSource
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.FallbackStreamResolver
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
-import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
+import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import com.youxiang8727.mymediaplayer.core.domain.repository.AudioStreamRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.VideoRepository
@@ -21,8 +21,8 @@ import kotlinx.coroutines.flow.map
 class VideoRepositoryImpl @Inject constructor(
     private val dataSource: YoutubeDataSource
 ) : VideoRepository {
-    override suspend fun search(query: String): Result<List<VideoResult>> =
-        runCatching { dataSource.search(query) }
+    override suspend fun search(query: String, continuationToken: String?): Result<VideoSearchPage> =
+        runCatching { dataSource.search(query, continuationToken) }
 }
 
 @Singleton
