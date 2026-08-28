@@ -41,13 +41,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /** 播放清單列表頁（無狀態） */
 @Composable
@@ -144,6 +149,10 @@ private fun PlaylistListItem(
     onRename: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val configuration = LocalConfiguration.current
+    val localeList = configuration.locales
+    val locale = if (localeList.size() > 0) localeList[0] else Locale.getDefault()
+    val dateFormat = SimpleDateFormat("yyyy-MM-dd", locale)
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -166,12 +175,7 @@ private fun PlaylistListItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "建立於 ${
-                        java.text.SimpleDateFormat(
-                            "yyyy-MM-dd",
-                            java.util.Locale.getDefault()
-                        ).format(java.util.Date(playlist.createdAt))
-                    }",
+                    text = "建立於 ${dateFormat.format(Date(playlist.createdAt))}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -241,7 +245,24 @@ fun PlaylistListRoute(
     )
 }
 
-@Preview(showBackground = true, name = "PlaylistList - Empty")
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistList - Empty - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistList - Empty - Light"
+)
 @Composable
 private fun PlaylistListScreenEmptyPreview() {
     MyMediaPlayerTheme {
@@ -254,7 +275,24 @@ private fun PlaylistListScreenEmptyPreview() {
     }
 }
 
-@Preview(showBackground = true, name = "PlaylistList - Items")
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistList - Items - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistList - Items - Light"
+)
 @Composable
 private fun PlaylistListScreenItemsPreview() {
     MyMediaPlayerTheme {

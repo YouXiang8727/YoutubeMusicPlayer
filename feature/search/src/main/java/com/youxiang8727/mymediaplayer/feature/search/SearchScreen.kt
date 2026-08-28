@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -241,7 +242,24 @@ fun SearchRoute(
     )
 }
 
-@Preview(showBackground = true, name = "Search - Empty")
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Empty - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Empty - Light"
+)
 @Composable
 private fun SearchScreenEmptyPreview() {
     MyMediaPlayerTheme {
@@ -256,7 +274,24 @@ private fun SearchScreenEmptyPreview() {
     }
 }
 
-@Preview(showBackground = true, name = "Search - Results")
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Results - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Results - Light"
+)
 @Composable
 private fun SearchScreenResultsPreview() {
     MyMediaPlayerTheme {

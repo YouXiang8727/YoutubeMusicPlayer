@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.unit.dp
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
@@ -116,7 +117,24 @@ fun PlaylistPickerSheet(
     }
 }
 
-@Preview(showBackground = true, name = "PlaylistPicker - With Items")
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistPickerSheet - With Items - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistPickerSheet - With Items - Light"
+)
 @Composable
 private fun PlaylistPickerSheetPreview() {
     MyMediaPlayerTheme {
@@ -133,7 +151,24 @@ private fun PlaylistPickerSheetPreview() {
     }
 }
 
-@Preview(showBackground = true, name = "PlaylistPicker - Empty")
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistPickerSheet - Empty - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistPickerSheet - Empty - Light"
+)
 @Composable
 private fun PlaylistPickerSheetEmptyPreview() {
     MyMediaPlayerTheme {

@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.Devices
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
 
 /**
@@ -45,7 +46,24 @@ fun CreatePlaylistDialog(
     )
 }
 
-@Preview(showBackground = true, name = "CreatePlaylistDialog")
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "CreatePlaylistDialog - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "CreatePlaylistDialog - Light"
+)
 @Composable
 private fun CreatePlaylistDialogPreview() {
     MyMediaPlayerTheme {
