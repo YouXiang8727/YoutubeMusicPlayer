@@ -18,6 +18,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
+    testOptions {
+        // 純 JVM 單元測試環境沒有 android.util.Log 實作；讓其 no-op（回傳預設值）以免
+        // YoutubeDataSource.search 的 SearchPaging log 在測試中擲 "not mocked"。
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {

@@ -3,10 +3,15 @@ package com.youxiang8727.mymediaplayer.core.domain.repository
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
+import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import kotlinx.coroutines.flow.Flow
 
 interface VideoRepository {
-    suspend fun search(query: String): Result<List<VideoResult>>
+    /**
+     * 執行搜尋或載入下一頁。
+     * @param continuationToken null = 初次搜尋；非 null = 以該 token 載入續頁
+     */
+    suspend fun search(query: String, continuationToken: String? = null): Result<VideoSearchPage>
 }
 
 interface PlaylistRepository {
