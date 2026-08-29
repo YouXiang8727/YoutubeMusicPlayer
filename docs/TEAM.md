@@ -8,7 +8,7 @@
 
 | 代號 | 角色 | 擁有目錄 | 禁區 | 兼職 |
 |------|------|----------|------|------|
-| **A - Tech Lead** | 架構守門人 | `settings.gradle.kts`、`gradle/libs.versions.toml`、根 `build.gradle.kts`、`core/common`、`core/domain`、`.github/`、`docs/`、`app/`（容器層） | B/C/D 的擁有目錄（治理例外見 §8） | 唯一可 merge `master`；版本升級統一 PR |
+| **A - Tech Lead** | 架構守門人 | `settings.gradle.kts`、`gradle/libs.versions.toml`、根 `build.gradle.kts`、`core/common`、`core/domain`、`.github/`、`docs/`、`app/`（容器層） | B/C/D 的擁有目錄（治理例外見 §8） | 開 PR 與審查；**merge 一律由 Owner 在 GitHub 執行**（A 不代按，除非 Owner 明確指示）；版本升級統一 PR |
 | **B - Data/Media Engineer** | 資料與播放 | `core/data/`、`feature/player/src/main/java/**/service/`、`feature/player/src/main/java/**/playback/`（播放控制鏈：PlayerController、PlaybackSnapshot 等，2026-08 裁定） | `feature/*/ui`、`core/ui` | NewPipe / StreamResolver 穩定度監控 |
 | **C - UI Engineer** | 前端介面 | `core/ui/`、`feature/search/`、`feature/playlist/`、`feature/player/` 的 Screen 與 ViewModel | `data/remote`、`data/local`（只能透過 `core:domain` 的 UseCase） | — |
 | **D - QA Engineer** | 獨立驗證 | `docs/qa/`（測試計畫、煙霧清單、報告） | **所有產品程式碼目錄**（只驗證，不開發） | 發版前回歸測試總召 |
@@ -123,7 +123,7 @@ app ──▶ feature:* ──▶ core:ui ──▶ (無)
 
 | 角色 | AI 模式下的職責 |
 |------|-----------------|
-| **A - Tech Lead** | **純協調**：需求確認 → 工作拆解與指派（R/A/I）→ 派工 → 審查 → merge `master`。**不撰寫 B/C/D 領域的產品程式碼** |
+| **A - Tech Lead** | **純協調**：需求確認 → 工作拆解與指派（R/A/I）→ 派工 → 審查 → 開 PR → **等 Owner 在 GitHub 執行 merge** → 收尾。**不撰寫 B/C/D 領域的產品程式碼**；**不代按 merge（除非 Owner 明確指示）** |
 | **B / C - subagent** | 開發＋自測＋依 DoD 回報（見下）；不做跨領域越界編輯 |
 | **D - QA subagent** | **獨立驗證**：單元測試執行、模擬器煙霧測試、logcat crash 監控、回歸報告；不修改任何產品程式碼，驗證 FAIL 退回 A 走同一套迴圈 |
 
