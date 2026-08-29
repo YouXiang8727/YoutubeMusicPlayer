@@ -19,6 +19,7 @@
 | 10 | 播放清單 CRUD | 加入／移除／清空播放清單 | 列表即時更新、重啟 App 後保留 | ✅ adb |
 | 11 | crash 監控 | 全程 `logcat -d` 收尾 | 無 FATAL EXCEPTION、無 ANR 記錄 | ✅ adb |
 | 12 | 播放失敗 snackbar | 播放失敗情境（模擬器 IP 全封即固定重現；或實機斷網點卡片）下點擊結果卡片 | 數秒內底部出現 snackbar，以「播放失敗：」開頭並帶聚合原因；同一錯誤持續期間只彈一次（約 4 秒後消失不重彈）；再次點擊同曲重試失敗後 snackbar 應再次出現 | ✅ adb（截圖輪詢） |
+| 13 | 搜尋續頁（載入更多） | 搜尋關鍵字 → 捲到底點「載入更多」連續 2~3 頁 → `adb logcat -d \| grep SearchPaging` | 每頁 `APPEND` 的 `dup=0`、`next` token 逐頁推進、無 `WARN token not advanced`、無 crash | ✅ adb + logcat |
 
 ## 已知問題登記
 <!-- 測試中發現但暫不修的問題，附 issue/PR 與報告連結 -->

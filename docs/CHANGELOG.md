@@ -59,6 +59,7 @@
 - 入口管制物理強化：B/C/D agent 改 `mode: subagent`（僅可被 Task tool 派工），Tech Lead 改 `mode: primary` 並設為專案 `default_agent`——使用者唯一入口 = Tech Lead；QA 編輯禁區收緊至整個產品程式碼目錄（含 src/test）
 - 新增三份角色專屬技能包（`.opencode/skills/`）：B `newpipe-stream-resolver`（解析管線與失效診斷 SOP）、C `compose-ui-conventions`（頁面三件套與注入白名單）、D `qa-smoke-runbook`（adb/logcat 實操序列與報告格式）
 - `docs/TEAM.md` §8 新增「入口管制（物理強制）」條目，記錄上述機制與技能包維護權責
+- 新增搜尋續頁 QA 驗證報告（`docs/qa/reports/2026-08-29-804da8f-search-pagination.md`）：4 頁續頁 token 鏈、`APPEND dup=0`、無 `WARN token not advanced`、無 crash 全 PASS；「載入更多」採顯式按鈕經 A 判讀為**設計使然**（非 infinite-scroll）並結案；常規驗證項納入煙霧清單 #13
 
 ## [1.0.0] - 2026-08
 
