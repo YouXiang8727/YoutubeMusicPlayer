@@ -41,6 +41,7 @@
   - `PlaylistListScreen`：日期格式化移除 `Locale.getDefault()` 依賴，改用 `LocalConfiguration.current.locales` 固定 Preview 語系
 - **feature:player / feature:playlist / feature:search / core:ui**：新增 `debugImplementation(libs.androidx.compose.ui.tooling)`（core:ui 用 `debugApi` 向下傳遞），修復 Preview 無法渲染的 `ClassNotFoundException: ComposeViewAdapter` 核心問題 —— `ui-tooling-preview` 僅含註解 API，實際渲染需 `ui-tooling` runtime
 - `PlaylistDetailScreen`：AsyncImage 補上 `placeholder` / `error` 使用 `MaterialTheme.colorScheme.surfaceVariant`，空縮圖顯示主題色塊；佔位 Box 同步改用 `surfaceVariant` 取代硬編碼 `Color.LightGray`，統一 Preview 與運行時視覺
+- 修復 `feature:player` 既有編譯破洞：`PlaylistItem` 新增必填 `playlistId` 參數後，`PlaybackQueueBuilderTest` 建構呼叫未同步（PR #9），`./gradlew test` 恢復全綠（186 tasks）
 
 ### Removed
 - 移除 legacy `androidx.media` 依賴（通知改由 Media3 session 提供）
