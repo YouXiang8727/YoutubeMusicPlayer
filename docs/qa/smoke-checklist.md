@@ -20,6 +20,12 @@
 | 11 | crash 監控 | 全程 `logcat -d` 收尾 | 無 FATAL EXCEPTION、無 ANR 記錄 | ✅ adb |
 | 12 | 播放失敗 snackbar | 播放失敗情境（模擬器 IP 全封即固定重現；或實機斷網點卡片）下點擊結果卡片 | 數秒內底部出現 snackbar，以「播放失敗：」開頭並帶聚合原因；同一錯誤持續期間只彈一次（約 4 秒後消失不重彈）；再次點擊同曲重試失敗後 snackbar 應再次出現 | ✅ adb（截圖輪詢） |
 | 13 | 搜尋續頁（載入更多） | 搜尋關鍵字 → 捲到底點「載入更多」連續 2~3 頁 → `adb logcat -d \| grep SearchPaging` | 每頁 `APPEND` 的 `dup=0`、`next` token 逐頁推進、無 `WARN token not advanced`、無 crash | ✅ adb + logcat |
+| 14 | 媒體通知產生（自訂 RemoteViews） | 播放任一首 → `dumpsys notification \| grep youxiang8727` | 通知 id=1001 `template=DecoratedMediaCustomViewStyle`、`contentView` 為自訂 RemoteViews、flags 含 FOREGROUND_SERVICE | ✅ adb + logcat |
+| 15 | 通知 5 按鍵布局 | 實機播放 → 下拉通知列 → 逐顆點擊隨機／上一首／播放暫停／下一首／循環 | 5 顆按鈕各自可點、獨立反饋、互不重疊；播放/暫停/切歌行為正確 | ⚠️ 需實機／人工（模擬器 shade 以 SystemUI carousel 取代，無法自動驗證） |
+| 16 | 通知點擊返回 App | 實機播放 → Home 退背景 → 點通知卡片主體 | 返回 App（自訂 content intent 生效）。模擬器 `contentIntent=null`（2026-08-29 實測回不了 App，疑 Media3 DecoratedMediaCustomViewStyle 覆寫），需實機確認 | ⚠️ 需實機／人工 |
+| 17 | 隨機 icon 紅＋badge 切換 | 播放 → 開隨機（shuffle active）→ 觀察通知隨機 icon；關閉後再看 | shuffle 開啟＝主題紅＋badge，關閉＝白無 badge（`ic_shuffle_active.xml` vs `ic_shuffle.xml`） | ⚠️ 需實機／人工（模擬器 icon 可視受限，僅靜態佐證） |
+| 18 | 滑掉 App → 停止播放 | 播放中 → recents 上滑移除任務 → `dumpsys media_session`＋通知 flags | PlaybackState 變 PAUSED speed=0.0 位置凍結；通知 flags 移除 FOREGROUND_SERVICE/ONGOING（service 離前台）；播放停止 | ✅ adb（PlaybackState→PAUSED；通知 flags 降為 ONLY_ALERT_ONCE\|NO_CLEAR） |
+| 19 | 任務移除後重開可重播 | 承接 #18 → `am start` 重開 App → 點 miniplayer play | 重連生效：PlaybackState 轉 PLAYING、position 推進、通知恢復 FGS（ensureConnected/重連鏈） | ✅ adb |
 
 ## 已知問題登記
 <!-- 測試中發現但暫不修的問題，附 issue/PR 與報告連結 -->
@@ -27,3 +33,5 @@
 - **[P1] 串流解析失敗時 UI 零回饋**（2026-08-26，commit `0ae95d7`）——✅ **已修復結案**（commit `df10e5c`）：App 內 snackbar 顯示「播放失敗：」＋聚合原因，one-shot 不重彈、重試會再提示；複測 R1–R4 全 PASS，證據見 `docs/qa/reports/2026-08-26-df10e5c-smoke-playback-error-snackbar.md`。常規驗證項目已納入本清單 #12。
 - **[E1] 模擬器環境無法驗證串流解析**（2026-08-26，commit `0ae95d7`）——⏳ **仍開放**：模擬器 NAT 出口 IP（資料中心網段）遭 YouTube 全面 bot 封鎖，NewPipe／InnerTube IOS/ANDROID_VR 皆回 LOGIN_REQUIRED、Piped 回 HTTP 525。播放**成功**路徑（MiniPlayerBar、背景續播、切歌 TTL 快取、成功時不出現 snackbar）仍需實機＋非資料中心網路複測（操作指引見 `2026-08-26-0ae95d7-smoke-direct-play-fallback.md`「需人工」節與 `2026-08-26-df10e5c` 報告同節）。
   - **複測 `b7c7d09`（2026-08-26）**：HTTP client 隔離修正後端到端播放**仍 FAIL**，三層 fallback 全滅（NewPipe LOGIN_REQUIRED／InnerTube IOS+ANDROID_VR LOGIN_REQUIRED／Piped HTTP 403），錯誤型態與前兩輪一致。QA 診斷確認：主機出口 IP `139.162.98.189` 屬 Linode 資料中心網段且無系統代理（模擬器出口＝同一 IP），封鎖為 **per-IP 層級**，UA 隔離修正無法解；修正本身已落地（程式碼＋單元測試可證）。與 Tech Lead「本機 curl 可取得 plain URL」主張矛盾，已依規範升級 Owner 裁決。詳見 `docs/qa/reports/2026-08-26-b7c7d09-smoke-http-isolation-s1-playback.md`。
+- **[N1] 通知主體 content intent 失敗**（2026-08-29，commit `28ef0f7`）——⏳ **待 A 判定**：`dumpsys notification` 顯示 `contentIntent=null`，實測點通知卡片回不了 App。疑 Media3 `DecoratedMediaCustomViewStyle` 覆寫/未套用自訂 root content intent。模擬器判定（列表單元 #16），需實機複測＋code review 確認為缺陷或可接受。證據 `docs/qa/reports/2026-08-29-28ef0f7-smoke-notification-provider.md`。
+- **[N2] 滑掉任務後通知未自動消失**（2026-08-29，commit `28ef0f7`）——⏳ **待 A 裁定**：`onTaskRemoved` 後播放確停（PAUSED speed=0.0）且 service 離前台（flags 移除 FGS/ONGOING），但通知殘留 6s+、service 未清。與 Media3 bound-controller 限制一致，但「通知消失」為本次變更宣稱預期結果，實測不符。D 建議裁定是否需補撤下邏輯（列表單元 #18）。證據同上報告。

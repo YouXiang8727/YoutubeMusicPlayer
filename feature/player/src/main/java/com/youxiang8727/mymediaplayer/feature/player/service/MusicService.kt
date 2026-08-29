@@ -1,7 +1,5 @@
 package com.youxiang8727.mymediaplayer.feature.player.service
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.Intent
 import android.os.Bundle
 import android.os.IBinder
@@ -13,18 +11,15 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.session.CommandButton
-import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
-import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.youxiang8727.mymediaplayer.core.domain.repository.AudioStreamRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
-import com.youxiang8727.mymediaplayer.feature.player.R
+import com.youxiang8727.mymediaplayer.feature.player.playback.MediaControllerPlayerController
 import com.youxiang8727.mymediaplayer.feature.player.playback.PlaybackQueueBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.IOException
@@ -34,7 +29,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -43,6 +40,8 @@ import kotlinx.coroutines.launch
  * - 播放佇列：點播的歌在播放清單中 → 整份清單從該曲起播；否則單曲。
  * - 串流 URL 以 ResolvingDataSource 於載入當下逐首解析（NewPipe），loader thread 內同步等待。
  * - 隨機/循環由 ExoPlayer 原生支援，系統通知、鎖屏、藍牙耳機鍵皆可用。
+ * - 通知列採用自訂 [PlayerMediaNotificationProvider]（RemoteViews）：每顆按鈕獨立點擊反饋、
+ *   root 設 content intent 返回 App、保留進度條；隨機/循環 icon 隨播放模式切換。
  */
 @AndroidEntryPoint
 class MusicService : MediaSessionService() {
@@ -50,10 +49,18 @@ class MusicService : MediaSessionService() {
     @Inject lateinit var streamResolver: AudioStreamRepository
     @Inject lateinit var playlistRepository: PlaylistRepository
 
+    /**
+     * App 側的 MediaController（MediaControllerPlayerController）綁住本 service，會讓
+     * service 在滑掉任務後無法真正 destroy（onDestroy 不觸發 ⇒ 通知殘留）。此處注入以便
+     * [onTaskRemoved] 時釋放其綁定，讓 service 得以終止；釋放後下次 play() 仍需重連。
+     */
+    @Inject lateinit var playerController: MediaControllerPlayerController
+
     private var player: ExoPlayer? = null
     private var mediaSession: MediaSession? = null
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var progressTickerJob: kotlinx.coroutines.Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -70,31 +77,43 @@ class MusicService : MediaSessionService() {
             .build()
 
         setMediaNotificationProvider(
-            DefaultMediaNotificationProvider.Builder(this)
-                .setChannelId(CHANNEL_ID)
-                .setChannelName(R.string.feature_player_channel_playback)
-                .build()
-                .apply { setSmallIcon(R.drawable.ic_music_notification) }
+            PlayerMediaNotificationProvider(this)
         )
 
-        // 監聽播放模式變更，重新設定通知列 custom layout（icon 隨狀態切換）
+        // 監聽播放模式變更，重新繪製通知列（icon 隨狀態切換）
         newPlayer.addListener(object : Player.Listener {
             override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-                refreshNotificationCustomLayout()
+                triggerNotificationUpdate()
             }
             override fun onRepeatModeChanged(repeatMode: Int) {
-                refreshNotificationCustomLayout()
+                triggerNotificationUpdate()
+            }
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                // 播放／暫停切換時重繪（play/pause icon），並維持進度 ticker 運作
+                triggerNotificationUpdate()
             }
         })
+
+        startProgressTicker()
     }
 
-    /** 重新設定通知列 custom layout，使 icon 反映最新播放模式。 */
-    private fun refreshNotificationCustomLayout() {
-        val session = mediaSession ?: return
-        // 取目前所有已連線的 controller，逐一重新設定
-        for (i in 0 until session.connectedControllers.size) {
-            val controller = session.connectedControllers[i]
-            session.setCustomLayout(controller, buildCustomLayout(session))
+    /**
+     * 自訂 Provider 不會像 DefaultMediaNotificationProvider 定期重繪進度：
+     * 以 service scope 每秒喚醒一次，播放中觸發 [triggerNotificationUpdate] 重建 RemoteViews。
+     */
+    private fun startProgressTicker() {
+        progressTickerJob?.cancel()
+        progressTickerJob = serviceScope.launch {
+            while (isActive) {
+                val p = player
+                if (p != null && p.isPlaying) {
+                    triggerNotificationUpdate()
+                    delay(PROGRESS_TICK_INTERVAL_MS)
+                } else {
+                    // 未播放時不需每秒重繪；略等後再檢查（避免 busy loop）
+                    delay(IDLE_TICK_INTERVAL_MS)
+                }
+            }
         }
     }
 
@@ -166,11 +185,6 @@ class MusicService : MediaSessionService() {
             )
         }
 
-        /** 通知列上的隨機／循環按鈕（custom layout 於連線後掛載）。 */
-        override fun onPostConnect(session: MediaSession, controller: MediaSession.ControllerInfo) {
-            session.setCustomLayout(controller, buildCustomLayout(session))
-        }
-
         override fun onCustomCommand(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
@@ -189,32 +203,6 @@ class MusicService : MediaSessionService() {
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
-    }
-
-    /**
-     * 依目前播放模式動態選 icon 的 custom layout：
-     * - 隨機：已啟用 → ic_shuffle_active / 未啟用 → ic_shuffle
-     * - 循環：ALL → ic_repeat / ONE → ic_repeat_one
-     */
-    private fun buildCustomLayout(session: MediaSession): ImmutableList<CommandButton> {
-        val p = player
-        val shuffleIcon = if (p?.shuffleModeEnabled == true) R.drawable.ic_shuffle_active else R.drawable.ic_shuffle
-        val repeatIcon = when (p?.repeatMode) {
-            Player.REPEAT_MODE_ONE -> R.drawable.ic_repeat_one
-            else -> R.drawable.ic_repeat
-        }
-        return ImmutableList.of(
-            CommandButton.Builder()
-                .setDisplayName("隨機播放")
-                .setIconResId(shuffleIcon)
-                .setSessionCommand(SessionCommand(COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
-                .build(),
-            CommandButton.Builder()
-                .setDisplayName("循環模式（清單／單曲）")
-                .setIconResId(repeatIcon)
-                .setSessionCommand(SessionCommand(COMMAND_CYCLE_REPEAT, Bundle.EMPTY))
-                .build()
-        )
     }
 
     // endregion
@@ -253,16 +241,22 @@ class MusicService : MediaSessionService() {
             .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
             .build()
 
-    /** 使用者從最近使用清單劃掉 App：沒在播就收掉服務，避免孤兒前景通知。 */
+    /** 使用者從最近使用清單劃掉 App：一律關閉 Service 與播放（不做「沒在播才停」的條件判斷）。 */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val p = player
-        if (p == null || !p.playWhenReady || p.mediaItemCount == 0 && p.playbackState == Player.STATE_IDLE) {
-            stopSelf()
-        }
-    }
+        // pauseAllPlayersAndStopSelf() 會 pause 播放、把 Service 移出 foreground 並 stopSelf()，
+        // 是唯一能在「播放中」安全終止 foreground service 的途徑（單純 stopSelf 會被系統重建）。
+        // 但 service 因 App 側 MediaController（playerController）仍 binding 而無法真正 destroy
+        // （onDestroy 不觸發），導致 session 仍在 ⇒ MediaNotificationManager 不會撤下通知。
+        // Media3 官方對「有外部 controller 綁住 service」的建議（MediaSessionService.onTaskRemoved
+        // javadoc）：release session 再 stopSelf，讓所有 controller 斷線、通知撤下、service 得以
+        // 真正 destroy。故先停播，再釋放 session 與 App 側 controller（釋放後 ensureConnected()
+        // 仍會於下次 play() 重新連線，不影響從 recents 重開）。
+        pauseAllPlayersAndStopSelf()
 
-    private fun createNotificationChannel() {
-        // Channel 由 DefaultMediaNotificationProvider 依 CHANNEL_ID 建立，此處不需手動建。
+        mediaSession?.release()
+        mediaSession = null
+
+        playerController.release()
     }
 
     override fun onDestroy() {
@@ -285,5 +279,10 @@ class MusicService : MediaSessionService() {
         const val COMMAND_CYCLE_REPEAT = "com.youxiang8727.mymediaplayer.command.CYCLE_REPEAT"
         const val EXTRA_VIDEO_ID = "extra_video_id"
         const val EXTRA_TITLE = "extra_title"
+
+        /** 播放中進度重繪間隔（毫秒）。 */
+        private const val PROGRESS_TICK_INTERVAL_MS = 1000L
+        /** 未播放時輪詢間隔（毫秒），避免 busy loop。 */
+        private const val IDLE_TICK_INTERVAL_MS = 250L
     }
 }

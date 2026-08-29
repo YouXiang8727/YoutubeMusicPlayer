@@ -18,14 +18,18 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 
@@ -34,6 +38,7 @@ import kotlinx.coroutines.launch
  * 並把 Player 事件 + 定時取樣折疊成 [PlaybackSnapshot] StateFlow。
  */
 @Singleton
+@OptIn(ExperimentalCoroutinesApi::class) // flatMapLatest 在 coroutines 1.9.0 仍標 experimental
 class MediaControllerPlayerController @Inject constructor(
     @ApplicationContext private val context: Context
 ) : PlayerController {
@@ -41,6 +46,9 @@ class MediaControllerPlayerController @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val controllerFlow = MutableStateFlow<MediaController?>(null)
+
+    /** 避免初次 play() 與 init 的連線重疊觸發兩顆 MediaController（會漏綁第一顆）。 */
+    private var connectInFlight = false
 
     private val _playback = MutableStateFlow(PlaybackSnapshot())
     override val playback: StateFlow<PlaybackSnapshot> = _playback.asStateFlow()
@@ -51,22 +59,29 @@ class MediaControllerPlayerController @Inject constructor(
         runCatching { connectToSession() }
             .onFailure { android.util.Log.e(TAG, "MediaController 連線初始化失敗", it) }
 
+        // flatMapLatest：controller 換人（release → null，或 reconnect → 新 controller）時，
+        // 自動取消上一顆的觀察迴圈並切到新的；避免舊 controller 一直把資料塞進 _playback。
         scope.launch {
-            controllerFlow.collect { controller ->
-                if (controller == null) {
-                    _playback.value = PlaybackSnapshot()
-                } else {
-                    observeSnapshot(controller)
+            controllerFlow
+                .flatMapLatest { controller ->
+                    if (controller == null) {
+                        flowOf(PlaybackSnapshot())
+                    } else {
+                        observeSnapshot(controller)
+                    }
                 }
-            }
+                .collect { _playback.value = it }
         }
     }
 
     private fun connectToSession() {
+        if (connectInFlight) return
+        connectInFlight = true
         val token = SessionToken(context, ComponentName(context, MusicService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()
         future.addListener(
             {
+                connectInFlight = false
                 runCatching { controllerFlow.value = future.get() }
                     .onFailure { android.util.Log.e(TAG, "MediaController 連線失敗", it) }
             },
@@ -74,8 +89,26 @@ class MediaControllerPlayerController @Inject constructor(
         )
     }
 
+    /**
+     * 釋放目前連線的 MediaController（供 App 容器層在滑掉任務時呼叫）。
+     * 釋放後 controllerFlow = null → 快照切回空狀態；下次任何需要 controller 的動作
+     * 會經 [ensureConnected] 重新建立連線，不需重建本 instance。
+     */
+    fun release() {
+        controllerFlow.value?.release()
+        controllerFlow.value = null
+    }
+
+    /** 需要 controller 的動作前排程連線：null（滑掉任務後）→ 重新 buildAsync。 */
+    private fun ensureConnected() {
+        if (controllerFlow.value == null) {
+            runCatching { connectToSession() }
+                .onFailure { android.util.Log.e(TAG, "MediaController 重連失敗", it) }
+        }
+    }
+
     /** 監聽 Player 事件並定時取樣 position，折疊成快照流。 */
-    private suspend fun observeSnapshot(controller: MediaController) {
+    private fun observeSnapshot(controller: MediaController): Flow<PlaybackSnapshot> {
         val events = callbackFlow {
             val listener = object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) { trySend(Unit) }
@@ -99,9 +132,8 @@ class MediaControllerPlayerController @Inject constructor(
             }
         }
 
-        combine(events, ticker) { _, _ -> controller.toSnapshot() }
+        return combine(events, ticker) { _, _ -> controller.toSnapshot() }
             .onStart { emit(controller.toSnapshot()) }
-            .collect { _playback.value = it }
     }
 
     private fun MediaController.toSnapshot(): PlaybackSnapshot {
@@ -137,8 +169,10 @@ class MediaControllerPlayerController @Inject constructor(
     }
 
     override fun play(videoId: String, title: String) {
-        // startForegroundService 啟動服務並帶入 PLAY 指令；
-        // MediaController 的 bind 不會觸發 onStartCommand，兩者相輔相成。
+        // 滑掉任務後 controller 已被 release；先確保連線，再帶 PLAY 指令啟動服務。
+        // MediaController 的 bind 不會觸發 onStartCommand，兩者相輔相成；
+        // service 重建後 session 才存在，buildAsync 連線為異步，快照短暫停留空狀態屬預期。
+        ensureConnected()
         val intent = Intent(context, MusicService::class.java)
             .setAction(MusicService.ACTION_PLAY)
             .putExtra(MusicService.EXTRA_VIDEO_ID, videoId)
@@ -146,20 +180,20 @@ class MediaControllerPlayerController @Inject constructor(
         context.startForegroundService(intent)
     }
 
-    override fun togglePlayPause() = withController { if (it.isPlaying) it.pause() else it.play() }
+    override fun togglePlayPause() { ensureConnected(); withController { if (it.isPlaying) it.pause() else it.play() } }
 
-    override fun seekToNext() = withController { it.seekToNext() }
+    override fun seekToNext() { ensureConnected(); withController { it.seekToNext() } }
 
-    override fun seekToPrevious() = withController { it.seekToPrevious() }
+    override fun seekToPrevious() { ensureConnected(); withController { it.seekToPrevious() } }
 
-    override fun seekTo(positionMs: Long) = withController { it.seekTo(positionMs) }
+    override fun seekTo(positionMs: Long) { ensureConnected(); withController { it.seekTo(positionMs) } }
 
-    override fun toggleShuffle() = withController { it.shuffleModeEnabled = !it.shuffleModeEnabled }
+    override fun toggleShuffle() { ensureConnected(); withController { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
 
-    override fun cycleRepeatMode() = withController {
+    override fun cycleRepeatMode() { ensureConnected(); withController {
         it.repeatMode =
             if (it.repeatMode == Player.REPEAT_MODE_ONE) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_ONE
-    }
+    } }
 
     override fun stop() {
         context.startService(Intent(context, MusicService::class.java).setAction(MusicService.ACTION_STOP))

@@ -24,6 +24,8 @@
 - `PlayerController` 介面與 `PlaybackSnapshot` 資料類別移至 `core:domain`，作為跨 feature 共用播放控制合約
 
 ### Changed
+- **通知列改為自訂 RemoteViews Provider**（`feature.player.service.PlayerMediaNotificationProvider`）：每顆控制按鈕（隨機／上一首／播放暫停／下一首／循環）獨立點擊反饋、root 設 content intent 點通知返回 App（launch intent＋`SINGLE_TOP|CLEAR_TOP`，不依賴 app 容器 Activity class）、隨機/循環 icon 隨播放模式切換、進度條改為**顯示型不可拖曳**（AOSP RemoteViews 限制，seek 保留於 App 內迷你播放列）；以 Media3 `MediaStyleNotificationHelper.DecoratedMediaCustomViewStyle` 綁定 platform media token，在保留自訂 RemoteViews 的同時讓系統認得為媒體通知（鎖屏／媒體整合）——1.11.0 無公開 `sessionCompat`，改以官方 style 綁定
+- **滑掉 App（task removed）一律停止播放並關閉前台通知**：`onTaskRemoved` 改為 Media3 官方 `pauseAllPlayersAndStopSelf()`（停播、移出前台、通知消失）；`MediaControllerPlayerController` 提供 `release()`/`ensureConnected()`：service 遭系統回收後 `play()` 自動重連（從 recents 重開仍可播），並將 MediaController 觀察迴圈改為 `flatMapLatest` 修復斷線重連時的無縫切換
 - **App 主題色系全面重設計**：深色模式為主採用中性深灰/黑背景 (#121212) + 紅/橙系強調色 (#FF3B30)，參考 YouTube Music / Spotify 風格；淺色模式對應乾淨白/淺灰背景；保留 Android 12+ 動態配色支援
 - 色彩命名語意化：移除 `Purple80` 等實作命名，改用 Material 3 標準角色（`Primary`、`OnPrimary`、`Surface`、`SurfaceVariant`、`SurfaceContainer` 等 20+ 語意色），完整支援 M3 色彩系統
 - Typography 完整覆寫：`displayLarge/Small`、`headlineLarge/Medium/Small`、`titleLarge/Medium/Small`、`bodyLarge/Medium/Small`、`labelLarge/Medium/Small` 皆依 Material 3 規範設定字重/大小/行高，字體採系統預設 `FontFamily.Default`
@@ -32,6 +34,10 @@
 - Media3 升級 1.5.1 → 1.11.0（exoplayer / session 統一）
 
 ### Fixed
+- **通知卡片點擊返回 App**：補上 `NotificationCompat.Builder.setContentIntent`（自訂 RemoteViews 在 `DecoratedMediaCustomViewStyle` 下包進系統裝飾容器，卡片點擊由 `notification.contentIntent` 驅動，僅設 root `setOnClickPendingIntent` 無效）
+- **滑掉 App 後通知殘留**：`onTaskRemoved` 於 `pauseAllPlayersAndStopSelf()` 後再 `mediaSession.release()` 與 `playerController.release()`（Media3 對 external bound controller 的官方建議），使 session 移除→通知撤下、binding 釋放→Service 真正 destroy；下次 `play()` 經 `ensureConnected()` 重連
+- **`ic_shuffle_active` 與 inactive 難以分辨**：active 版改填 App 主題紅 `#FF3B30` 並在右上角加圓點 badge，通知與前景迷你播放列皆可一眼辨識（原為舊版 Material 紫 `#FF6200EE`，與「通知圖示統一白色」政策及主題色皆不一致）
+- **修復滑掉任務後再播放失效**：`MediaControllerPlayerController` 新增 `release()`（滑掉任務時由容器層釋放 MediaController），並在需 controller 的動作（play/toggle/seek 等）前 `ensureConnected()` 自動重建連線；同時把快照觀察改為 `flatMapLatest`，讓 release→null / reconnect→新 controller 時能正確切換觀察迴圈（原 `collect` 會卡在第一顆 controller 上、無法切換），並加 `connectInFlight` guard 避免初次連線重疊
 - **修復搜尋「載入更多」輪迴**：根因為 GET `results?continuation=` 會回傳**整頁重新排序**（與前頁重疊 55~100%）。改為續頁走 innerTube `POST youtubei/v1/search`（MWEB context，append-only chunk，重疊 0%；續頁 renderer 為 `videoWithContextRenderer`，欄位對應與首頁不同故新增獨立解析路徑）。ViewModel 補跨頁去重（防 `LazyColumn` duplicate-key 崩潰）與「token 未推進視為到底」guard。新增 `SearchPaging` log（每頁 SUMMARY＋DETAIL 全量 videoId:title＋token 未推進 WARN），供實機驗證續頁正確性
 - **降級 Compose BOM 至 `2025.01.00` (Compose 1.7.6)**，解決 Android Studio 253.32098.37 Preview `ClassNotFoundException: ComposeViewAdapter` 問題：新版 BOM (2026.02.01 → Compose 1.10.4) 超出 AS 設計工具插件支援範圍，降級後 Preview 可正常載入
 - 修復所有 Compose Preview 渲染問題：

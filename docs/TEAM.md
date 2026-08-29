@@ -111,7 +111,8 @@ app ──▶ feature:* ──▶ core:ui ──▶ (無)
 | 播放控制在 feature 內（PlayerController），不進 core:domain | 播放是裝置能力而非業務領域；MiniPlayerBar 由 app 層掛載，feature 間不需互相依賴 |
 | 串流 URL 逐首解析（ResolvingDataSource）而非預解析全佇列 | NewPipe 解析有時效性且成本高；loader thread 同步解析＋快取已足夠 |
 | 串流解析採多層 fallback（NewPipe → InnerTube IOS/ANDROID_VR 直連 → Piped 實例），不自建 poToken/BotGuard WebView | 2026 年中 YouTube 對 WEB 系 client 全面要求 po_token，匿名 bot 封鎖升級 extractor 解不了（v0.26.5 已是最新仍無解）；IOS/ANDROID_VR client 免 token 是當前可行替代但屬易腐路徑；BotGuard token 綁 session/content 且需 JS 執行環境，自建成本遠超收益；Piped 公開實例不穩定故只墊底。InnerTube client 版本失效時更新常數即可（InnerTubeStreamSource companion） |
-| 通知上隨機／循環按鈕圖示不隨狀態切換 | DefaultMediaNotificationProvider 的 custom layout 不支援 per-state icon；精確狀態以前景 App 內為準 |
+| 通知改為自訂 `MediaNotification.Provider`（RemoteViews）取代 DefaultMediaNotificationProvider | ①每顆按鈕獨立點擊反饋（Media3 內建 custom layout 的點擊反饋落整條控制列）②content intent 自訂（點通知返回 App）③隨機/循環 icon 隨播放模式切換（shuffle 啟用＝主題紅＋badge）。代價：進度條為**顯示型不可拖曳**（AOSP RemoteViews 不支援可拖曳 SeekBar，seek 保留於 App 內 MiniPlayerBar）、需自行每秒重繪進度、失去 Media3 預設 artwork 載入（本專案 metadata 未提供 artwork，無實際差異） |
+| 滑掉 App（task removed）一律關閉播放與前台通知 | 使用者需求「滑掉即停」；以 `pauseAllPlayersAndStopSelf()` 停播並移出前台（Media3 官方對播放中 MediaSessionService 的標準關閉途徑，不能只 `stopSelf()` 否則被系統重建）。官方文件明示「有 MediaController bound 時 Service 無法真正 stop」需 controller 擁有者釋放，但 `Activity.onTaskRemoved` 於 API 37 已從 framework 移除、無容器層 hook，故由 service 層兜底：stopped＋非前台＋無通知的殘留 background service 無使用者可見影響且系統可回收。`MediaControllerPlayerController` 提供 `release()`/`ensureConnected()`：service 遭系統回收後 `play()` 自動重連（從 recents 重開仍可播） |
 | 搜尋續頁走 innerTube POST（`youtubei/v1/search`，MWEB client）而非 GET `?continuation=` | 2026-08 多頁實測：GET 續頁回傳**整頁重新排序**（重疊 55~100%）→ 載入更多變輪迴；POST 回傳 append-only chunk（重疊 0%）。雖 MWEB client 屬易腐路徑，但 chunk 解析拆成純函數、失效改寫成本可控 |
 
 ## 8. AI 協作運作模式（Loop Engineering）

@@ -73,7 +73,8 @@
 - `feature.player.service.MusicService`：Media3 `MediaSessionService`
   - 播放佇列：點播曲目在播放清單中 → 整份清單從該曲起播；否則單曲（`playback.PlaybackQueueBuilder` 純函數，有單元測試）
   - 串流 URL 以 `ResolvingDataSource` 於載入當下逐首解析（NewPipe）
-  - 通知由系統自動產生：歌名、進度條（可拖曳 seek）、播放/暫停/前後曲；隨機與循環為 custom layout 按鈕（custom command）
+  - 通知採用自訂 `service.PlayerMediaNotificationProvider`（Media3 `MediaNotification.Provider` + RemoteViews）：每顆控制按鈕（隨機／上一首／播放暫停／下一首／循環）獨立點擊反饋、content intent 返回 App（`getLaunchIntentForPackage`，不依賴 `:app` 的 Activity class）、顯示型進度條、隨機/循環 icon 隨播放模式切換（shuffle 啟用為主題紅＋badge）；以 `MediaStyleNotificationHelper.DecoratedMediaCustomViewStyle` 維持系統媒體通知整合
+  - 點通知返回 App 以 launch intent＋`FLAG_ACTIVITY_SINGLE_TOP|CLEAR_TOP` 重建任務；`onTaskRemoved` 一律關閉 Service（配合 app 層釋放 MediaController）
   - Service 的 Manifest 宣告在 feature 模組內（manifest merging 併入 app）；POST_NOTIFICATIONS 由 app 於啟動時動態請求
 
 ### :app
