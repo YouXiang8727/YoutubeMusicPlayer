@@ -10,6 +10,8 @@
 ## [Unreleased]
 
 ### Added
+- 通知本體點擊回前景：`MusicService` 以 `MediaSession.setSessionActivity` 設定 contentIntent（`PendingIntent` 指向 `MainActivity`，`SINGLE_TOP`＋`IMMUTABLE`），點通知本體（非按鈕）即把 App 帶回前景
+- 通知列隨機/循環按鈕改用 Media3 官方 `CommandButton.ICON_*`（`ICON_SHUFFLE_ON/OFF`、`ICON_REPEAT_ALL/ONE`），移除 deprecated `setIconResId` 與自訂 `ic_shuffle_on` drawable；官方 `ICON_SHUFFLE_OFF` 以 disabled 色呈現，隨機開/關一眼可辨
 - 搜尋結果「載入更多」：`feature:search` 新增 `SearchIntent.LoadMore`、`LoadMoreFooter`（僅在 `nextPageToken != null` 顯示，載入中 disabled＋小進度）；ViewModel 以 continuation token 併頁 append（去重）、空頁視為「已無更多」、token 過期失敗保留原結果可重試；新增 `SearchViewModelTest`（9 案例，純 JVM）
 - 搜尋分頁資料鏈：新增 `VideoSearchPage(results, nextPageToken)` 領域模型；`VideoRepository.search` / `SearchVideosUseCase` 支援 `continuationToken` 透傳；`YoutubeDataSource` 解析 `continuationItemRenderer` token（internal 純函數可測）並移除每頁 30 筆硬上限
 - 搜尋列表點擊影片改為直接播放（不進入播放頁）：新增 `PlaybackIntent.Play`，由 app 層將搜尋 callback 橋接至播放控制
