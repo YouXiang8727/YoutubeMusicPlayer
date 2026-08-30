@@ -2,6 +2,7 @@ package com.youxiang8727.mymediaplayer.feature.player.service
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
 import android.os.IBinder
@@ -58,15 +59,31 @@ class MusicService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
 
+        val mediaSourceFactory = DefaultMediaSourceFactory(this)
+            .setDataSourceFactory(resolvingDataSourceFactory())
+
         val newPlayer = ExoPlayer.Builder(applicationContext)
             .setMediaSourceFactory(
-                DefaultMediaSourceFactory(resolvingDataSourceFactory())
-            )
-            .build()
+                mediaSourceFactory
+            ).build()
         newPlayer.repeatMode = Player.REPEAT_MODE_ALL
         player = newPlayer
+
+        // 點通知本體（非按鈕）時把 App 帶回前景；Media3 藉 sessionActivity 設為通知 contentIntent。
+        // 以 setClassName 字串指向 app 的 MainActivity，避免 feature:player 對 :app 產生 compile 依賴。
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent().setClassName(
+                packageName,
+                "com.youxiang8727.mymediaplayer.MainActivity"
+            ).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         mediaSession = MediaSession.Builder(this, newPlayer)
             .setCallback(sessionCallback)
+            .setSessionActivity(contentIntent)
             .build()
 
         setMediaNotificationProvider(
@@ -192,26 +209,23 @@ class MusicService : MediaSessionService() {
     }
 
     /**
-     * 依目前播放模式動態選 icon 的 custom layout：
-     * - 隨機：已啟用 → ic_shuffle_active / 未啟用 → ic_shuffle
-     * - 循環：ALL → ic_repeat / ONE → ic_repeat_one
+     * 依目前播放模式動態選 Media3 官方 icon 的 custom layout：
+     * - 隨機：已啟用 → ICON_SHUFFLE_ON / 未啟用 → ICON_SHUFFLE_OFF（官方 disabled 色）
+     * - 循環：ALL → ICON_REPEAT_ALL / ONE → ICON_REPEAT_ONE
      */
     private fun buildCustomLayout(session: MediaSession): ImmutableList<CommandButton> {
         val p = player
-        val shuffleIcon = if (p?.shuffleModeEnabled == true) R.drawable.ic_shuffle_active else R.drawable.ic_shuffle
-        val repeatIcon = when (p?.repeatMode) {
-            Player.REPEAT_MODE_ONE -> R.drawable.ic_repeat_one
-            else -> R.drawable.ic_repeat
-        }
         return ImmutableList.of(
-            CommandButton.Builder()
+            CommandButton.Builder(
+                if (p?.shuffleModeEnabled == true) CommandButton.ICON_SHUFFLE_ON else CommandButton.ICON_SHUFFLE_OFF
+            )
                 .setDisplayName("隨機播放")
-                .setIconResId(shuffleIcon)
                 .setSessionCommand(SessionCommand(COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
                 .build(),
-            CommandButton.Builder()
+            CommandButton.Builder(
+                if (p?.repeatMode == Player.REPEAT_MODE_ONE) CommandButton.ICON_REPEAT_ONE else CommandButton.ICON_REPEAT_ALL
+            )
                 .setDisplayName("循環模式（清單／單曲）")
-                .setIconResId(repeatIcon)
                 .setSessionCommand(SessionCommand(COMMAND_CYCLE_REPEAT, Bundle.EMPTY))
                 .build()
         )
