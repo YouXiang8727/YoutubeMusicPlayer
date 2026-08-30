@@ -15,7 +15,6 @@ import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
-import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
@@ -86,12 +85,15 @@ class MusicService : MediaSessionService() {
             .setSessionActivity(contentIntent)
             .build()
 
+        // 自訂 MediaNotificationProvider：覆寫 getMediaButtons 回傳固定按鈕序列，
+        // 避免父類別在 custom layout 外再補系統 prev/next 造成通知列重複 icon。
         setMediaNotificationProvider(
-            DefaultMediaNotificationProvider.Builder(this)
-                .setChannelId(CHANNEL_ID)
-                .setChannelName(R.string.feature_player_channel_playback)
-                .build()
-                .apply { setSmallIcon(R.drawable.ic_music_notification) }
+            CustomMediaNotificationProvider(
+                this,
+                { NOTIFICATION_ID },
+                CHANNEL_ID,
+                R.string.feature_player_channel_playback
+            ).apply { setSmallIcon(R.drawable.ic_music_notification) }
         )
 
         // 監聽播放模式變更，重新設定通知列 custom layout（icon 隨狀態切換）
@@ -187,7 +189,14 @@ class MusicService : MediaSessionService() {
 
         /** 常駐上一首／下一首與隨機／循環按鈕（custom layout 於連線後掛載）。 */
         override fun onPostConnect(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            // 連線後同時設定該 controller 的 custom layout 與「廣播級」media button preferences。
+            // 兩者用同一份 buildCustomLayout(session)（含 SLOT_BACK / SLOT_FORWARD）：
+            // Media3 的 MediaSessionLegacyStub（line 1923-1930）須在「mediaButtonPreferences 非空」
+            // 且 custom layout 含 SLOT_BACK/FORWARD 按鈕時，才會從 PlaybackState.actions 移除
+            // ACTION_SKIP_TO_PREVIOUS/NEXT，令 SystemUI 的 MediaStyle media surface 不再渲染系統
+            // prev/seekbar/next，解決展開通知重複「上一首/下一首」icon。
             session.setCustomLayout(controller, buildCustomLayout(session))
+            session.setMediaButtonPreferences(buildCustomLayout(session))
         }
 
         override fun onCustomCommand(
