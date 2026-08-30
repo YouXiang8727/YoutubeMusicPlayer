@@ -34,6 +34,7 @@
 - Media3 升級 1.5.1 → 1.11.0（exoplayer / session 統一）
 
 ### Fixed
+- **修復通知列「上一首／下一首」icon 消失**：根因為系統按鈕依 ExoPlayer `availableCommands` 產生，佇列只有 1 首或單曲循環播到末端時 `hasNextMediaItem()=false` 而移除 `COMMAND_SEEK_TO_NEXT`，icon 隨之隱藏（排版跳動）。改為在 `buildCustomLayout` 以 `SLOT_BACK`/`SLOT_FORWARD` 提供常駐「上一首／下一首」按鈕取代系統按鈕，並改為**自訂 session command**（`COMMAND_PREVIOUS`/`COMMAND_NEXT`）；佇列無可去曲目時點擊由 service 端 `seekToDefaultPosition()` 重播目前曲目開頭。通知列排版（上一首、播放/暫停、下一首、隨機、循環）恆定不變
 - **修復搜尋「載入更多」輪迴**：根因為 GET `results?continuation=` 會回傳**整頁重新排序**（與前頁重疊 55~100%）。改為續頁走 innerTube `POST youtubei/v1/search`（MWEB context，append-only chunk，重疊 0%；續頁 renderer 為 `videoWithContextRenderer`，欄位對應與首頁不同故新增獨立解析路徑）。ViewModel 補跨頁去重（防 `LazyColumn` duplicate-key 崩潰）與「token 未推進視為到底」guard。新增 `SearchPaging` log（每頁 SUMMARY＋DETAIL 全量 videoId:title＋token 未推進 WARN），供實機驗證續頁正確性
 - **降級 Compose BOM 至 `2025.01.00` (Compose 1.7.6)**，解決 Android Studio 253.32098.37 Preview `ClassNotFoundException: ComposeViewAdapter` 問題：新版 BOM (2026.02.01 → Compose 1.10.4) 超出 AS 設計工具插件支援範圍，降級後 Preview 可正常載入
 - 修復所有 Compose Preview 渲染問題：

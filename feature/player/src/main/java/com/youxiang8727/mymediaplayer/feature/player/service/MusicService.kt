@@ -176,6 +176,8 @@ class MusicService : MediaSessionService() {
                 MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                     .add(SessionCommand(COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
                     .add(SessionCommand(COMMAND_CYCLE_REPEAT, Bundle.EMPTY))
+                    .add(SessionCommand(COMMAND_PREVIOUS, Bundle.EMPTY))
+                    .add(SessionCommand(COMMAND_NEXT, Bundle.EMPTY))
                     .build()
             return MediaSession.ConnectionResult.accept(
                 sessionCommands,
@@ -203,6 +205,16 @@ class MusicService : MediaSessionService() {
                             if (it.repeatMode == Player.REPEAT_MODE_ONE) Player.REPEAT_MODE_ALL
                             else Player.REPEAT_MODE_ONE
                     }
+                COMMAND_PREVIOUS ->
+                    player?.let { p ->
+                        if (p.hasPreviousMediaItem()) p.seekToPreviousMediaItem()
+                        else p.seekToDefaultPosition()   // 無上一首（第 1 首/單曲）→ 目前曲目開頭重播
+                    }
+                COMMAND_NEXT ->
+                    player?.let { p ->
+                        if (p.hasNextMediaItem()) p.seekToNextMediaItem()
+                        else p.seekToDefaultPosition()   // 無下一首（最後一首/單曲）→ 目前曲目開頭重播
+                    }
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
@@ -210,12 +222,24 @@ class MusicService : MediaSessionService() {
 
     /**
      * 依目前播放模式動態選 Media3 官方 icon 的 custom layout：
+     * - 上一首／下一首：以自訂 session command 常駐提供（SLOT_BACK / SLOT_FORWARD），取代系統按鈕，
+     *   不受 player command 可用性影響而消失；無可去曲目時於 service 端重播目前曲目開頭。
      * - 隨機：已啟用 → ICON_SHUFFLE_ON / 未啟用 → ICON_SHUFFLE_OFF（官方 disabled 色）
      * - 循環：ALL → ICON_REPEAT_ALL / ONE → ICON_REPEAT_ONE
      */
     private fun buildCustomLayout(session: MediaSession): ImmutableList<CommandButton> {
         val p = player
         return ImmutableList.of(
+            CommandButton.Builder(CommandButton.ICON_PREVIOUS)
+                .setSessionCommand(SessionCommand(COMMAND_PREVIOUS, Bundle.EMPTY))
+                .setDisplayName("上一首")
+                .setSlots(CommandButton.SLOT_BACK)
+                .build(),
+            CommandButton.Builder(CommandButton.ICON_NEXT)
+                .setSessionCommand(SessionCommand(COMMAND_NEXT, Bundle.EMPTY))
+                .setDisplayName("下一首")
+                .setSlots(CommandButton.SLOT_FORWARD)
+                .build(),
             CommandButton.Builder(
                 if (p?.shuffleModeEnabled == true) CommandButton.ICON_SHUFFLE_ON else CommandButton.ICON_SHUFFLE_OFF
             )
@@ -297,6 +321,8 @@ class MusicService : MediaSessionService() {
         const val ACTION_STOP = "com.youxiang8727.mymediaplayer.action.STOP"
         const val COMMAND_TOGGLE_SHUFFLE = "com.youxiang8727.mymediaplayer.command.TOGGLE_SHUFFLE"
         const val COMMAND_CYCLE_REPEAT = "com.youxiang8727.mymediaplayer.command.CYCLE_REPEAT"
+        const val COMMAND_PREVIOUS = "com.youxiang8727.mymediaplayer.command.PREVIOUS"
+        const val COMMAND_NEXT = "com.youxiang8727.mymediaplayer.command.NEXT"
         const val EXTRA_VIDEO_ID = "extra_video_id"
         const val EXTRA_TITLE = "extra_title"
     }
