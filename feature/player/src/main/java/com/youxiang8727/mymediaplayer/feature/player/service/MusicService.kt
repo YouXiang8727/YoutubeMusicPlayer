@@ -15,7 +15,6 @@ import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
-import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
@@ -86,12 +85,15 @@ class MusicService : MediaSessionService() {
             .setSessionActivity(contentIntent)
             .build()
 
+        // 自訂 MediaNotificationProvider：覆寫 getMediaButtons 回傳固定按鈕序列，
+        // 避免父類別在 custom layout 外再補系統 prev/next 造成通知列重複 icon。
         setMediaNotificationProvider(
-            DefaultMediaNotificationProvider.Builder(this)
-                .setChannelId(CHANNEL_ID)
-                .setChannelName(R.string.feature_player_channel_playback)
-                .build()
-                .apply { setSmallIcon(R.drawable.ic_music_notification) }
+            CustomMediaNotificationProvider(
+                this,
+                { NOTIFICATION_ID },
+                CHANNEL_ID,
+                R.string.feature_player_channel_playback
+            ).apply { setSmallIcon(R.drawable.ic_music_notification) }
         )
 
         // 監聽播放模式變更，重新設定通知列 custom layout（icon 隨狀態切換）
@@ -164,7 +166,7 @@ class MusicService : MediaSessionService() {
         }
     }
 
-    // region MediaSession callback（通知列上的隨機 / 循環按鈕）
+    // region MediaSession callback（通知列 custom layout 按鈕：常駐上一首/下一首 + 隨機/循環）
 
     private val sessionCallback = object : MediaSession.Callback {
 
@@ -176,6 +178,8 @@ class MusicService : MediaSessionService() {
                 MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                     .add(SessionCommand(COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
                     .add(SessionCommand(COMMAND_CYCLE_REPEAT, Bundle.EMPTY))
+                    .add(SessionCommand(COMMAND_PREVIOUS, Bundle.EMPTY))
+                    .add(SessionCommand(COMMAND_NEXT, Bundle.EMPTY))
                     .build()
             return MediaSession.ConnectionResult.accept(
                 sessionCommands,
@@ -183,9 +187,16 @@ class MusicService : MediaSessionService() {
             )
         }
 
-        /** 通知列上的隨機／循環按鈕（custom layout 於連線後掛載）。 */
+        /** 常駐上一首／下一首與隨機／循環按鈕（custom layout 於連線後掛載）。 */
         override fun onPostConnect(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            // 連線後同時設定該 controller 的 custom layout 與「廣播級」media button preferences。
+            // 兩者用同一份 buildCustomLayout(session)（含 SLOT_BACK / SLOT_FORWARD）：
+            // Media3 的 MediaSessionLegacyStub（line 1923-1930）須在「mediaButtonPreferences 非空」
+            // 且 custom layout 含 SLOT_BACK/FORWARD 按鈕時，才會從 PlaybackState.actions 移除
+            // ACTION_SKIP_TO_PREVIOUS/NEXT，令 SystemUI 的 MediaStyle media surface 不再渲染系統
+            // prev/seekbar/next，解決展開通知重複「上一首/下一首」icon。
             session.setCustomLayout(controller, buildCustomLayout(session))
+            session.setMediaButtonPreferences(buildCustomLayout(session))
         }
 
         override fun onCustomCommand(
@@ -203,6 +214,15 @@ class MusicService : MediaSessionService() {
                             if (it.repeatMode == Player.REPEAT_MODE_ONE) Player.REPEAT_MODE_ALL
                             else Player.REPEAT_MODE_ONE
                     }
+                // 常駐「上一首／下一首」：通知列按鈕不受 player command 可用性影響
+                COMMAND_PREVIOUS ->
+                    player?.let { p ->
+                        if (p.hasPreviousMediaItem()) p.seekToPreviousMediaItem() else p.seekToDefaultPosition()
+                    }
+                COMMAND_NEXT ->
+                    player?.let { p ->
+                        if (p.hasNextMediaItem()) p.seekToNextMediaItem() else p.seekToDefaultPosition()
+                    }
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
@@ -210,12 +230,27 @@ class MusicService : MediaSessionService() {
 
     /**
      * 依目前播放模式動態選 Media3 官方 icon 的 custom layout：
+     * - 上一首／下一首：常駐按鈕（SLOT_BACK / SLOT_FORWARD），不受「曲目位置影響」——
+     *   系統 prev/next 依 `hasPreviousMediaItem()` / `hasNextMediaItem()` 在清單邊界或單曲時會消失，
+     *   故改用自訂 session command 的 CommandButton 佔固定 slot，維持 compact 排版為 [上一首, 播放/暫停, 下一首]；
+     *   落點由 onCustomCommand 處理：無上/下一首時重播目前曲目開頭。
      * - 隨機：已啟用 → ICON_SHUFFLE_ON / 未啟用 → ICON_SHUFFLE_OFF（官方 disabled 色）
      * - 循環：ALL → ICON_REPEAT_ALL / ONE → ICON_REPEAT_ONE
+     * （隨機／循環維持既有邏輯，僅放入展開區）
      */
     private fun buildCustomLayout(session: MediaSession): ImmutableList<CommandButton> {
         val p = player
         return ImmutableList.of(
+            CommandButton.Builder(CommandButton.ICON_PREVIOUS)
+                .setDisplayName("上一首")
+                .setSessionCommand(SessionCommand(COMMAND_PREVIOUS, Bundle.EMPTY))
+                .setSlots(CommandButton.SLOT_BACK)
+                .build(),
+            CommandButton.Builder(CommandButton.ICON_NEXT)
+                .setDisplayName("下一首")
+                .setSessionCommand(SessionCommand(COMMAND_NEXT, Bundle.EMPTY))
+                .setSlots(CommandButton.SLOT_FORWARD)
+                .build(),
             CommandButton.Builder(
                 if (p?.shuffleModeEnabled == true) CommandButton.ICON_SHUFFLE_ON else CommandButton.ICON_SHUFFLE_OFF
             )
@@ -297,6 +332,8 @@ class MusicService : MediaSessionService() {
         const val ACTION_STOP = "com.youxiang8727.mymediaplayer.action.STOP"
         const val COMMAND_TOGGLE_SHUFFLE = "com.youxiang8727.mymediaplayer.command.TOGGLE_SHUFFLE"
         const val COMMAND_CYCLE_REPEAT = "com.youxiang8727.mymediaplayer.command.CYCLE_REPEAT"
+        const val COMMAND_PREVIOUS = "com.youxiang8727.mymediaplayer.command.PREVIOUS"
+        const val COMMAND_NEXT = "com.youxiang8727.mymediaplayer.command.NEXT"
         const val EXTRA_VIDEO_ID = "extra_video_id"
         const val EXTRA_TITLE = "extra_title"
     }
