@@ -34,6 +34,7 @@
 - Media3 升級 1.5.1 → 1.11.0（exoplayer / session 統一）
 
 ### Fixed
+- **通知列「上一首／下一首」改為永遠常駐**：改用 MediaSession 自訂 session command 的 `CommandButton`（`SLOT_BACK` / `SLOT_FORWARD`），取代系統依 `hasPreviousMediaItem()` / `hasNextMediaItem()` 過濾的 prev/next 按鈕——清單邊界或單曲時不再少一顆，compact 排版固定為 [上一首, 播放/暫停, 下一首]；無上/下一首時按鈕落點為重播目前曲目開頭
 - **修復搜尋「載入更多」輪迴**：根因為 GET `results?continuation=` 會回傳**整頁重新排序**（與前頁重疊 55~100%）。改為續頁走 innerTube `POST youtubei/v1/search`（MWEB context，append-only chunk，重疊 0%；續頁 renderer 為 `videoWithContextRenderer`，欄位對應與首頁不同故新增獨立解析路徑）。ViewModel 補跨頁去重（防 `LazyColumn` duplicate-key 崩潰）與「token 未推進視為到底」guard。新增 `SearchPaging` log（每頁 SUMMARY＋DETAIL 全量 videoId:title＋token 未推進 WARN），供實機驗證續頁正確性
 - **降級 Compose BOM 至 `2025.01.00` (Compose 1.7.6)**，解決 Android Studio 253.32098.37 Preview `ClassNotFoundException: ComposeViewAdapter` 問題：新版 BOM (2026.02.01 → Compose 1.10.4) 超出 AS 設計工具插件支援範圍，降級後 Preview 可正常載入
 - 修復所有 Compose Preview 渲染問題：
