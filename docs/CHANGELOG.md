@@ -32,6 +32,8 @@
 - 通知圖示統一白色：`ic_music_notification`、`ic_shuffle_active` 等 9 個 drawable 全改為 `#FFFFFFFF`，確保深色通知背景下可見度
 - MusicService 由手刻 Foreground Service 重構為 Media3 `MediaSessionService`；前景 UI 與背景通知共用同一狀態源
 - Media3 升級 1.5.1 → 1.11.0（exoplayer / session 統一）
+- `core:domain` 改純 Kotlin JVM module：改用 `org.jetbrains.kotlin.jvm` plugin（非 android.library）、移除未使用的 `core:common` 死依賴、coroutines 依賴由 `coroutines-android` 改為 `coroutines-core`（domain 僅用 Flow/StateFlow）——讓「純 Kotlin module」宣示名實相符
+- `core:domain` 測試覆蓋補齊：新增 `PlaylistUseCasesTest`（10 案例）涵蓋其餘 9 個 UseCase（Create/Rename/Delete/ObservePlaylists/ObservePlaylistItems/AddTo/RemoveFrom/Clear/ShufflePlay），全部純 JVM
 
 ### Fixed
 - **修復通知列重複「上一首／下一首」icon（方案 A）**：根因是 Media3 `DefaultMediaNotificationProvider.getMediaButtons`（DefaultMediaNotificationProvider.java line 457-514）會在 custom layout 之外，對未提供 SLOT_BACK/SLOT_FORWARD 按鈕的情況走 else-if 分支補上系統 `SEEK_TO_PREVIOUS` / `SEEK_TO_NEXT`，與自訂 prev/next 重複（實機 dumpsys 驗證 7 個 action）。新增 `feature:player.service.CustomMediaNotificationProvider` 覆寫 `getMediaButtons` 回傳固定序列 [上一首, 播放/暫停, 下一首, 隨機, 循環]，完全不呼叫系統 prev/next 分支——compact view 依 slots 判定固定為 [上一首(SLOT_BACK), 播放/暫停(SLOT_CENTRAL), 下一首(SLOT_FORWARD)]，展開通知再加 [隨機, 循環]。按鈕序列、custom command 落點（`onCustomCommand`）、ChannelId/ChannelName/smallIcon 設定皆不變
@@ -68,6 +70,10 @@
 - `docs/TEAM.md` §8 新增「入口管制（物理強制）」條目，記錄上述機制與技能包維護權責
 - 新增搜尋續頁 QA 驗證報告（`docs/qa/reports/2026-08-29-804da8f-search-pagination.md`）：4 頁續頁 token 鏈、`APPEND dup=0`、無 `WARN token not advanced`、無 crash 全 PASS；「載入更多」採顯式按鈕經 A 判讀為**設計使然**（非 infinite-scroll）並結案；常規驗證項納入煙霧清單 #13
 - TEAM.md §1/§8 修正 merge 權責：PR 的 **merge 一律由 Owner 在 GitHub 執行**（A 只負責開 PR 與審查，不代按 merge，除非 Owner 明確指示）
+- 新增 CI workflow（`.github/workflows/build-and-test.yml`，job 名 `build-and-test`）：PR 與 push master 自動跑 `./gradlew test assembleDebug`＋上傳測試報告，補齊 §3 Branch Protection 的 status check（先前缺失）
+- TEAM.md §7 修正「播放控制在 feature 內（PlayerController），不進 core:domain」決策記錄——與實際架構（介面進 `core:domain`、實作 `MediaControllerPlayerController` 留 `feature:player`）矛盾，已改寫對齊
+- TEAM.md §4 / ARCHITECTURE §2 擴充 ViewModel 注入規則字面為「UseCase / domain interface（Repository interface、`PlayerController` 等）」，消除與實際設計的歧義
+- ARCHITECTURE §1 補充 `core:domain` 以純 JVM module 建置（`org.jetbrains.kotlin.jvm`）
 
 ## [1.0.0] - 2026-08
 
