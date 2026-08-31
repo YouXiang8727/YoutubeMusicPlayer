@@ -52,6 +52,8 @@
 - 移除 legacy `androidx.media` 依賴（通知改由 Media3 session 提供）
 
 ### Docs
+- 新增 TEAM.md §4「開發原則」三條規範：① 改動範圍以需求為限（嚴禁順手重構/格式調整）② 棄用 API 必優先尋找替代方案（確無替代才用 @Suppress 並附遷移計畫）③ 嚴禁在保護分支直接開發（所有改動必須在 feature/fix 分支）
+- 新增 TEAM.md §1「QA 測試報告截圖規範」：模擬器/實機測試涉及畫面變動時，可取得截圖情況下必須附上截圖（失敗/異常優先，通過輔助）
 - 新增 TEAM.md §8「AI 協作運作模式（Loop Engineering）」：Tech Lead 純協調不開發、序列派工、審查迴圈（DoD／四段式回報／3 圈上限）、治理例外
 - 新增常設角色 **D - QA Engineer**：獨立於開發者的驗證（單元測試執行、模擬器煙霧測試、logcat 監控、發版回歸）；取消輪值兼職制；新增 `qa-engineer` agent 定義與初始煙霧測試清單（`docs/qa/smoke-checklist.md`）
 - `app/` 容器層所有權劃歸 Tech Lead（原三人都未擁有的灰色地帶）
