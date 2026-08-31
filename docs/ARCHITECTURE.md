@@ -13,7 +13,7 @@
 ├─ feature:playlist  # 播放清單（列表頁 + 詳情頁 + 共用 BottomSheet/Dialog）
 ├─ feature:player    # 播放頁 + MusicService（前景服務、背景音訊）→ 依賴 feature:playlist
 ├─ core:ui           # Material Theme、共用樣式（未來放共用 Composable）
-├─ core:domain       # 純 Kotlin：Model、Repository interface、UseCase、PlayerController 介面（零 Android 依賴）
+├─ core:domain       # 純 Kotlin：Model、Repository interface、UseCase、PlayerController 介面（零 Android 依賴）※建置用 org.jetbrains.kotlin.jvm（非 android.library）
 ├─ core:data         # Room、Retrofit/OkHttp、NewPipe 解析、Repository 實作、Hilt DataModule
 └─ core:common       # DispatcherProvider 等跨層小工具（純 Kotlin）
 ```
