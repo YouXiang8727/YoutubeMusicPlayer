@@ -54,7 +54,7 @@ app ──▶ feature:* ──▶ core:ui ──▶ (無)
 ```
 - `feature` **不可**依賴 `core:data`（build.gradle.kts 根本沒有這條線）。
 - `core:domain` 是純 Kotlin module：**禁止**出現任何 `android.*` import。
-- ViewModel 只准注入 UseCase / Repository interface，不准拿 Dao、Api、ExoPlayer。
+- ViewModel 只准注入 UseCase / domain interface（Repository interface、`PlayerController` 等），不准拿 Dao、Api、ExoPlayer。
 - 新增第三方庫：只在 `gradle/libs.versions.toml` 加版本，由 A 審核 PR。
 
 ### 測試要求
@@ -114,7 +114,7 @@ app ──▶ feature:* ──▶ core:ui ──▶ (無)
 | PlaylistItem 拆成 Domain Model + Room Entity | 讓 `core:domain` 保持零 Android 依賴，Room 細節封死在 `core:data` |
 | 移除 VideoResult 的 @Serializable | 全專案沒有序列化使用點，移除後 domain 不需要 serialization plugin |
 | detekt / dependency-guard 延後 | 模組邊界已由 Gradle 依賴圖物理強制，工具再加是第二道鎖 |
-| 播放控制在 feature 內（PlayerController），不進 core:domain | 播放是裝置能力而非業務領域；MiniPlayerBar 由 app 層掛載，feature 間不需互相依賴 |
+| 播放控制的**介面（PlayerController）進 core:domain、實作（MediaControllerPlayerController）留 feature** | 播放是裝置能力而非業務領域，故播放引擎實作不進 domain（核心維持零 Android 依賴）；但 ViewModel 需要一個跨 feature／可測試的播放控制契約，故把 `PlayerController` interface 與 `PlaybackSnapshot` 放進 `core:domain`（純 Kotlin，只依賴 coroutines Flow/StateFlow），實作以 MediaController 連線 MusicService 的 MediaSession。MiniPlayerBar 由 app 層掛載，feature 間不需互相依賴 |
 | 串流 URL 逐首解析（ResolvingDataSource）而非預解析全佇列 | NewPipe 解析有時效性且成本高；loader thread 同步解析＋快取已足夠 |
 | 串流解析採多層 fallback（NewPipe → InnerTube IOS/ANDROID_VR 直連 → Piped 實例），不自建 poToken/BotGuard WebView | 2026 年中 YouTube 對 WEB 系 client 全面要求 po_token，匿名 bot 封鎖升級 extractor 解不了（v0.26.5 已是最新仍無解）；IOS/ANDROID_VR client 免 token 是當前可行替代但屬易腐路徑；BotGuard token 綁 session/content 且需 JS 執行環境，自建成本遠超收益；Piped 公開實例不穩定故只墊底。InnerTube client 版本失效時更新常數即可（InnerTubeStreamSource companion） |
 | 通知上隨機／循環按鈕圖示不隨狀態切換 | DefaultMediaNotificationProvider 的 custom layout 不支援 per-state icon；精確狀態以前景 App 內為準 |

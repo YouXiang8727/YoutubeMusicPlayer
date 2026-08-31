@@ -33,7 +33,7 @@
 |------|---------|
 | feature 不得依賴 core:data | build.gradle.kts 沒有此依賴 → import 直接編譯失敗 |
 | core:domain 不得 import android.* | 純 Kotlin module，無 Android classpath |
-| UI 層不得 new Dao / Api / ExoPlayer | 只能注入 UseCase（Hilt graph 保證） |
+| UI 層不得 new Dao / Api / ExoPlayer | 只能注入 UseCase / domain interface（Hilt graph 保證） |
 
 ## 3. 各層職責與關鍵類別
 
