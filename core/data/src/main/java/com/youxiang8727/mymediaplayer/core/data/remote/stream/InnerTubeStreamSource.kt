@@ -17,7 +17,7 @@ import kotlinx.serialization.json.put
  * 背景：YouTube 對匿名 IP 的 bot 偵測封鎖（LOGIN_REQUIRED）主要卡在 WEB 系 client 的
  * po_token 政策；截至 2026 年中，IOS 與 ANDROID_VR client 仍可免 poToken 取得
  * plain（未加密）的 adaptiveFormats URL。client 版本號屬「易腐常數」，
- * 失效時優先懷疑版本被 YouTube 淘汰 → 更新 [IOS]／[ANDROID_VR] 的版本與 UA。
+ * 失效時優先懷疑版本被 YouTube 淘汰 → 更新共享 [InnerTubeClientProfiles] 的版本與 UA。
  *
  * 嘗試順序：IOS → ANDROID_VR（ANDROID client 已於 2026 年初被 YouTube 淘汰，不採用）。
  */
@@ -28,14 +28,10 @@ class InnerTubeStreamSource @Inject constructor(
 
     override val name: String = "InnerTube"
 
-    private data class ClientProfile(
-        val id: String,
-        val userAgent: String,
-        val clientIndexHeader: String,
-        val contextClient: JsonObject
+    private val profiles = listOf(
+        InnerTubeClientProfiles.IOS,
+        InnerTubeClientProfiles.ANDROID_VR
     )
-
-    private val profiles = listOf(IOS, ANDROID_VR)
 
     override suspend fun fetch(videoId: String): Result<String> {
         val failures = mutableListOf<String>()
@@ -121,44 +117,5 @@ class InnerTubeStreamSource @Inject constructor(
 
     private companion object {
         const val PLAYER_ENDPOINT = "https://www.youtube.com/youtubei/v1/player"
-
-        /**
-         * IOS client：免 poToken、免 API key（以 UA + clientVersion 驗證）。
-         * 版本易腐：失效時對照 yt-dlp / NewPipeExtractor 最新使用的 iOS 版本號更新。
-         */
-        val IOS = ClientProfile(
-            id = "IOS",
-            userAgent = "com.google.ios.youtube/20.49.6 (iPhone17,2; U; CPU iOS 18_4_1 like Mac OS X)",
-            clientIndexHeader = "5",
-            contextClient = buildJsonObject {
-                put("clientName", "IOS")
-                put("clientVersion", "20.49.6")
-                put("deviceMake", "Apple")
-                put("deviceModel", "iPhone17,2")
-                put("osName", "iOS")
-                put("osVersion", "18.4.1.22E219")
-                put("hl", "zh-TW")
-                put("gl", "TW")
-            }
-        )
-
-        /** ANDROID_VR client：免 poToken、免 JS 簽章、plain URL。 */
-        val ANDROID_VR = ClientProfile(
-            id = "ANDROID_VR",
-            userAgent = "com.google.android.apps.youtube.vr.oculus/1.71.26 " +
-                "(Linux; U; Android 12; US; Quest 3 Build/SQ3A.220605.009.A1) gzip",
-            clientIndexHeader = "28",
-            contextClient = buildJsonObject {
-                put("clientName", "ANDROID_VR")
-                put("clientVersion", "1.71.26")
-                put("deviceMake", "Oculus")
-                put("deviceModel", "Quest 3")
-                put("osName", "Android")
-                put("osVersion", "12")
-                put("androidSdkVersion", 32)
-                put("hl", "zh-TW")
-                put("gl", "TW")
-            }
-        )
     }
 }

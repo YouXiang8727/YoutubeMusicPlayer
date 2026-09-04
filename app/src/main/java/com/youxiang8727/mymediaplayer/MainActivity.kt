@@ -189,6 +189,12 @@ fun MyApp() {
                             playerViewModel.onPlaybackIntent(
                                 PlaybackIntent.Play(video.videoId, video.title)
                             )
+                        },
+                        // 熱門榜單：整份清單一併送入暫時性播放佇列，從點擊的歌曲起播
+                        onPlayChartQueue = { entries, startIndex ->
+                            playerViewModel.onPlaybackIntent(
+                                PlaybackIntent.PlayList(entries, startIndex)
+                            )
                         }
                     )
                 }

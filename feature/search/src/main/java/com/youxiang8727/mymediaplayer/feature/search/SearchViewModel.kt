@@ -1,11 +1,13 @@
 package com.youxiang8727.mymediaplayer.feature.search
 
+import com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.toPlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.usecase.AddToPlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.FetchTrendingSongsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchVideosUseCase
 import android.util.Log
@@ -31,7 +33,11 @@ data class SearchUiState(
     val nextPageToken: String? = null,
     val isLoadingMore: Boolean = false,
     val error: String? = null,
-    val searched: Boolean = false
+    val searched: Boolean = false,
+    // 熱門音樂榜單（空狀態區塊）：init 自動載入台灣榜單，僅在 searched == false 時顯示
+    val trendingItems: List<VideoResult> = emptyList(),
+    val trendingLoading: Boolean = false,
+    val trendingError: String? = null
 )
 
 sealed interface SearchIntent {
@@ -39,6 +45,7 @@ sealed interface SearchIntent {
     data object Search : SearchIntent
     data object LoadMore : SearchIntent
     data class AddToPlaylist(val video: VideoResult, val playlistId: Long) : SearchIntent
+    data object TrendingRetry : SearchIntent
 }
 
 @HiltViewModel
@@ -46,7 +53,8 @@ class SearchViewModel @Inject constructor(
     private val searchVideos: SearchVideosUseCase,
     private val addToPlaylist: AddToPlaylistUseCase,
     private val createPlaylist: CreatePlaylistUseCase,
-    observePlaylists: ObservePlaylistsUseCase
+    observePlaylists: ObservePlaylistsUseCase,
+    private val fetchTrendingSongs: FetchTrendingSongsUseCase
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SearchUiState())
@@ -62,6 +70,7 @@ class SearchViewModel @Inject constructor(
         observePlaylists()
             .onEach { list -> _playlists.value = list }
             .launchIn(viewModelScope)
+        fetchTrending()
     }
 
     fun onIntent(intent: SearchIntent) {
@@ -73,6 +82,31 @@ class SearchViewModel @Inject constructor(
                 intent.video.toPlaylistItem(intent.playlistId),
                 intent.playlistId
             )
+            SearchIntent.TrendingRetry -> fetchTrending()
+        }
+    }
+
+    /** 抓取台灣熱門音樂榜單；失敗僅寫 trendingError（UI 內嵌重試），不擋搜尋。 */
+    private fun fetchTrending() {
+        if (_state.value.trendingLoading) return
+        _state.update { it.copy(trendingLoading = true, trendingError = null) }
+        viewModelScope.launch {
+            fetchTrendingSongs(ChartRegion.TAIWAN)
+                .onSuccess { list ->
+                    _state.update {
+                        it.copy(trendingLoading = false, trendingItems = list, trendingError = null)
+                    }
+                }
+                .onFailure { e ->
+                    // 失敗清空榜單，讓 error 狀態成為唯一權威（重試成功後重新填回）
+                    _state.update {
+                        it.copy(
+                            trendingLoading = false,
+                            trendingItems = emptyList(),
+                            trendingError = e.message
+                        )
+                    }
+                }
         }
     }
 

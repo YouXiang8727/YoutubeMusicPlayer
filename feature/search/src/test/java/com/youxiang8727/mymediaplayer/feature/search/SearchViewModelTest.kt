@@ -1,5 +1,6 @@
 package com.youxiang8727.mymediaplayer.feature.search
 
+import com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
@@ -8,6 +9,7 @@ import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.VideoRepository
 import com.youxiang8727.mymediaplayer.core.domain.usecase.AddToPlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.FetchTrendingSongsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchVideosUseCase
 import kotlinx.coroutines.CoroutineScope
@@ -47,15 +49,22 @@ class SearchViewModelTest {
     /** 依 token 區分初次搜尋與載入更多回傳；記錄呼叫次數與收到的 token。 */
     private class FakeVideoRepository(
         var firstPageResult: Result<VideoSearchPage> = Result.success(VideoSearchPage(emptyList())),
-        var loadMoreResult: Result<VideoSearchPage> = Result.success(VideoSearchPage(emptyList()))
+        var loadMoreResult: Result<VideoSearchPage> = Result.success(VideoSearchPage(emptyList())),
+        var trendingResult: Result<List<VideoResult>> = Result.success(emptyList())
     ) : VideoRepository {
         var searchCalls = 0
         val receivedTokens = mutableListOf<String?>()
+        var trendingCalls = 0
 
         override suspend fun search(query: String, continuationToken: String?): Result<VideoSearchPage> {
             searchCalls++
             receivedTokens += continuationToken
             return if (continuationToken == null) firstPageResult else loadMoreResult
+        }
+
+        override suspend fun fetchTrendingSongs(region: ChartRegion): Result<List<VideoResult>> {
+            trendingCalls++
+            return trendingResult
         }
     }
 
@@ -82,7 +91,8 @@ class SearchViewModelTest {
             SearchVideosUseCase(repo),
             AddToPlaylistUseCase(EmptyPlaylistRepository),
             CreatePlaylistUseCase(EmptyPlaylistRepository),
-            ObservePlaylistsUseCase(EmptyPlaylistRepository)
+            ObservePlaylistsUseCase(EmptyPlaylistRepository),
+            FetchTrendingSongsUseCase(repo)
         )
         val messages = mutableListOf<String>()
         // 先於任何 VM 動作前訂閱 messages，確保 SharedFlow（replay=0）不會漏接。
@@ -246,5 +256,86 @@ class SearchViewModelTest {
         assertNull(h.vm.state.value.nextPageToken)
         assertEquals(listOf(v1, v2, v3), h.vm.state.value.results)
         assertTrue(h.messages.contains("已無更多結果"))
+    }
+
+    @Test
+    fun `init 自動載入台灣熱門榜單成功寫入 trendingItems`() {
+        val repo = FakeVideoRepository(
+            trendingResult = Result.success(listOf(v1, v2, v3))
+        )
+        val h = buildHarness(repo)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(listOf(v1, v2, v3), h.vm.state.value.trendingItems)
+        assertTrue(!h.vm.state.value.trendingLoading)
+        assertNull(h.vm.state.value.trendingError)
+        // init 載入不干擾搜尋狀態（仍為空狀態）
+        assertTrue(!h.vm.state.value.searched)
+        assertEquals(1, h.repo.trendingCalls)
+    }
+
+    @Test
+    fun `init 熱門榜單載入失敗寫入 trendingError 且 items 為空`() {
+        val repo = FakeVideoRepository(
+            trendingResult = Result.failure(RuntimeException("charts down"))
+        )
+        val h = buildHarness(repo)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals("charts down", h.vm.state.value.trendingError)
+        assertEquals(emptyList<VideoResult>(), h.vm.state.value.trendingItems)
+        assertTrue(!h.vm.state.value.trendingLoading)
+        assertNull(h.vm.state.value.error) // 不污染搜尋錯誤欄位
+    }
+
+    @Test
+    fun `TrendingRetry 重試成功清除錯誤並寫入榜單`() {
+        val repo = FakeVideoRepository(
+            trendingResult = Result.failure(RuntimeException("charts down"))
+        )
+        val h = buildHarness(repo)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("charts down", h.vm.state.value.trendingError)
+        assertEquals(1, h.repo.trendingCalls)
+
+        // 模擬後端恢復：換成成功結果後重試
+        repo.trendingResult = Result.success(listOf(v1, v2))
+        h.vm.onIntent(SearchIntent.TrendingRetry)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(listOf(v1, v2), h.vm.state.value.trendingItems)
+        assertNull(h.vm.state.value.trendingError)
+        assertTrue(!h.vm.state.value.trendingLoading)
+        assertEquals(2, h.repo.trendingCalls)
+    }
+
+    @Test
+    fun `熱門榜單與搜尋狀態互不干擾`() {
+        // 搜尋成功不影響已載入的 trending
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A")),
+            trendingResult = Result.success(listOf(v2, v3))
+        )
+        val h = buildHarness(repo)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(listOf(v2, v3), h.vm.state.value.trendingItems)
+
+        h.doSearch("晴天")
+        assertEquals(listOf(v1), h.vm.state.value.results)
+        assertTrue(h.vm.state.value.searched)
+        assertEquals(listOf(v2, v3), h.vm.state.value.trendingItems)
+        assertNull(h.vm.state.value.trendingError)
+
+        // 搜尋失敗也不影響已載入的 trending
+        val repo2 = FakeVideoRepository(
+            firstPageResult = Result.failure(RuntimeException("boom")),
+            trendingResult = Result.success(listOf(v2, v3))
+        )
+        val h2 = buildHarness(repo2)
+        dispatcher.scheduler.advanceUntilIdle()
+        h2.doSearch("晴天")
+        assertEquals("boom", h2.vm.state.value.error)
+        assertEquals(listOf(v2, v3), h2.vm.state.value.trendingItems)
+        assertNull(h2.vm.state.value.trendingError)
     }
 }

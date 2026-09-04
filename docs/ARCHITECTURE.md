@@ -40,10 +40,11 @@
 ### core:domain（純 Kotlin）
 - `core.domain.model.VideoResult` / `Playlist` / `PlaylistItem`：領域模型（無 Room/序列化標註）
 - `core.domain.model.VideoSearchPage`：搜尋結果一頁（`results` + `nextPageToken`，null = 已到底）；分頁由 continuation token 控制，不再有每頁上限
-- `core.domain.model.PlayerController`：播放控制介面（跨 feature 共用合約），ViewModel 只注入此介面
+- `core.domain.model.PlayerController`：播放控制介面（跨 feature 共用合約），ViewModel 只注入此介面；`play(videoId, title)` 為 Room 播放清單導向（點播曲在清單中→整份清單起播，否則單曲），`playQueue(items, startIndex)` 為**暫時性佇列**（熱門榜單等非 Room 清單直接以傳入清單起播，播放模式機制共用）
+- `core.domain.model.PlayQueueItem`：暫時性佇列項目（videoId + title 純 data class，零序列化標註；提供 `VideoResult.toPlayQueueItem()` 轉換）。傳遞採 controller 層平行 arrays（videoIds/titles）過 Intent，維持 domain 零序列化依賴
 - `core.domain.model.PlaybackSnapshot` / `RepeatMode`：播放狀態快照與循環模式枚舉
 - `core.domain.repository.VideoRepository` / `PlaylistRepository`：interface（`VideoRepository.search(query, continuationToken: String? = null): Result<VideoSearchPage>`）
-- `core.domain.usecase.*`：SearchVideos（支援續頁 token 透傳）、CreatePlaylist、RenamePlaylist、DeletePlaylist、ObservePlaylists、ObservePlaylistItems、AddToPlaylist、RemoveFromPlaylist、ClearPlaylist、ShufflePlayPlaylist
+- `core.domain.usecase.*`：SearchVideos（支援續頁 token 透傳）、FetchTrendingSongs（熱門音樂榜單，`region` 參數）、CreatePlaylist、RenamePlaylist、DeletePlaylist、ObservePlaylists、ObservePlaylistItems、AddToPlaylist、RemoveFromPlaylist、ClearPlaylist、ShufflePlayPlaylist
 - 測試：`src/test/` 純 JVM 單元測試（Fake Repository）
 
 ### core:data
@@ -51,14 +52,16 @@
 - `local.AppDatabase` / `PlaylistDao`：Room（`PlaylistDao` 含播放清單 CRUD、項目觀察、隨機取曲、級聯刪除）
 - `remote.YoutubeSearchApi`：Retrofit（行動版搜尋頁）；`searchHtml(query)` 初次以 GET `results` 抓取；`searchContinuation(clientName, clientVersion, body)` 續頁以 innerTube `POST youtubei/v1/search` 抓取 append-only chunk（baseUrl `https://m.youtube.com/`）
 - `remote.YoutubeDataSource`：解析 `ytInitialData` → `VideoSearchPage`。初次搜尋解析 `videoRenderer`（[parseYtInitialData]）；續頁（innerTube POST）解析 `videoWithContextRenderer`（[parseContinuationChunk]，欄位對應不同：videoId 於 `watchEndpoint`、title 於 `headline`）。token 擷取（`continuationItemRenderer.continuationEndpoint.continuationCommand.token`，優先 `CONTINUATION_REQUEST_TYPE_SEARCH`）與解析函式皆 internal 純函數（`extractYtInitialData` / `parseYtInitialData` / `parseContinuationChunk` / `collectVideoRenderers` / `collectContinuationVideoRenderers` / `extractContinuationToken`）供 JVM 測試；每頁輸出 `SearchPaging` log（SUMMARY/DETAIL 全量 videoId:title/WARN token 未推進）
+- `remote.TrendingPlaylistDataSource`：熱門音樂榜單（台灣官方 YouTube Music playlist「台灣百大熱門音樂影片」，owner = YouTube Music Global Charts 官方頻道，100 首）。不走 Retrofit，直接注入 `stream.StreamHttpTransport`（串流鏈現有抽象）POST innerTube browse（baseUrl `https://www.youtube.com/youtubei/v1/browse`，**不需新增 Retrofit**，clean client 身份由 body + headers 自帶）。client 用 **ANDROID_VR**（免 poToken，與串流鏈同家族，版本易腐一起監控；依 A 實證規格其 UA/headers/context 直接 hardcode 於本資料源，**不共享** `InnerTubeClientProfiles`，避免跨檔變更風險），首頁 body 帶 `browseId="VLPL4fGSI1pDJn4eKyK8APGwl0S0wgyHvQyU"`；**分頁聚合至整份**（約 100 首）：抓頁 → 全樹收 `playlistVideoRenderer`（videoId / title.runs[0] / shortBylineText.runs[0] / 首張縮圖）→ 累加去重 → 續頁 token 取 `playlistVideoListRenderer.continuations[0].nextContinuationData.continuation`（**非** continuationItemRenderer）。內部純函數 `parsePlaylistPage` / `collectPlaylistVideos` / `extractPlaylistContinuationToken` 供 JVM 測試；分頁上限 `MAX_PAGES=6` 防壞回應無限迴圈。HTTP 非 200 / 非合法 JSON / 重複 token → `Result.failure`（前端可顯示）。舊 charts 鏈（`ChartsApi`/`ChartsDataSource`、`WEB_MUSIC_ANALYTICS`＋`FEmusic_analytics_charts_home`）已於 2026-09 被汰除（恆 400、無 TW），已刪除
 - `remote.stream.AudioStreamSource`：串流解析來源抽象（data 層內部型別），三個實作依優先序組成 fallback 鏈：
   - `NewPipeStreamSource`（主路徑）：NewPipe Extractor
-  - `InnerTubeStreamSource`：直連 InnerTube player API（IOS → ANDROID_VR client，免 poToken；client 版本號為易腐常數）
+  - `InnerTubeStreamSource`：直連 InnerTube player API（IOS → ANDROID_VR client，免 poToken；client 版本號為易腐常數，集中於共享 `stream.InnerTubeClientProfiles`）
   - `PipedStreamSource`：Piped 公開實例 `/streams/{id}`（最後手段）
 - `remote.stream.FallbackStreamResolver`：依序嘗試來源、成功結果 TTL 快取、經 `StreamErrorClassifier` 分類錯誤並聚合可讀訊息
+- `remote.stream.InnerTubeClientProfiles`：免 poToken 的 innerTube client 身分常數（IOS／ANDROID_VR 的 UA、`X-YouTube-Client-Name`、context JsonObject）集中管理，供串流解析鏈 `InnerTubeStreamSource` 使用（熱門榜單資料源依規格 hardcode own ANDROID_VR profile、不共用本常數；易腐版本常數需互相對照更新）
 - `remote.NetworkModule`：HTTP client 依用途拆雙 profile（Hilt qualifier 定義於 `di.HttpProfileQualifiers`）：
   - `@BrowserProfile`：掛瀏覽器 UA／Referer／Cookie 攔截器（`YoutubeHeaderInterceptor`），僅供 Retrofit `YoutubeSearchApi` 抓行動版搜尋頁 HTML
-  - `@StreamProfile`：乾淨 client（僅逾時設定、無任何攔截器），串流解析鏈專用——NewPipe extractor 的 `remote.OkHttpDownloader`、InnerTube/Piped 的 `stream.OkHttpStreamHttpTransport`
+  - `@StreamProfile`：乾淨 client（僅逾時設定、無任何攔截器），串流解析鏈專用——NewPipe extractor 的 `remote.OkHttpDownloader`、InnerTube/Piped 的 `stream.OkHttpStreamHttpTransport` 都掛本 profile（熱門榜單走同抽象 `StreamHttpTransport`，不需 Retrofit）
   - 教訓：瀏覽器 header 一旦覆蓋 InnerTube client 身份 UA 或 extractor 自帶 UA，串流解析即遭 LOGIN_REQUIRED，故兩 profile 嚴禁混用
 - `repository.*Impl`：實作 domain interface（Entity ↔ Domain mapping）
 - `di.DataModule`：Database / Dispatcher / Repository 三組綁定
@@ -68,10 +71,13 @@
 
 ### feature:search | playlist | player
 - `*Route`（Hilt 容器）→ `*Screen`（無狀態 Composable）＋ `*ViewModel`（StateFlow + Intent）
+- `feature.search` 熱門音樂榜單（T4）：搜尋空狀態（`searched == false`）顯示「台灣熱門音樂」區塊——rail（前 10 筆，名次＋縮圖＋歌名＋歌手）＋「查看完整榜單」切換完整 50 筆列表（兩態皆在 module 內以區域 state 切換，**不新增 nav route**）。`SearchViewModel` 注入 `FetchTrendingSongsUseCase`，init 自動載入 `ChartRegion.TAIWAN`（`trendingItems / trendingLoading / trendingError` 三欄位）；失敗寫 `trendingError` 並以新增 `SearchIntent.TrendingRetry` 內嵌重試，**不擋搜尋**。點任一歌曲以**整份榜單**為暫時性佇列從該曲起播，經 `SearchRoute(onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit)`（帶預設 no-op，feature:search 不得依賴 feature:player，故型別只用 core:domain `PlayQueueItem`，由 app 容器層接線至 `PlaybackIntent.PlayList`）
+- `feature.player.PlayerViewModel.PlaybackIntent.PlayList(entries, startIndex)`：暫時性佇列播放意圖（熱門榜單等非 Room 清單），由 activity scope 的 PlayerViewModel 轉 call `PlayerController.playQueue(entries, startIndex)`（與 MusicService `ACTION_PLAY_QUEUE` 鏈路對接，見 §3 core:data 播放佇列）
 - `feature:playlist` 提供共用 `PlaylistPickerSheet`（BottomSheet）與 `CreatePlaylistDialog`，供 search/player 共用（故 search/player 依賴 playlist）
 - `feature.player.MiniPlayerBar`：前景常駐迷你播放列（隨機／前後曲／循環／歌名／進度條），由 app 層掛載於底部
 - `feature.player.service.MusicService`：Media3 `MediaSessionService`
   - 播放佇列：點播曲目在播放清單中 → 整份清單從該曲起播；否則單曲（`playback.PlaybackQueueBuilder` 純函數，有單元測試）
+  - 暫時性佇列（熱門榜單）：經 `PlayerController.playQueue` → `ACTION_PLAY_QUEUE`（平行陣列 videoIds/titles 過 Intent）直接起播，**不查 Room**；`PlaybackQueueBuilder.buildFromEntries` 純函數（startIndex clamp、空清單回 size 0），有單元測試
   - 串流 URL 以 `ResolvingDataSource` 於載入當下逐首解析（NewPipe）
   - 通知由自訂 `service.CustomMediaNotificationProvider`（`DefaultMediaNotificationProvider` 子類別）產生：覆寫 `getMediaButtons` 回傳**固定按鈕序列** [上一首, 播放/暫停, 下一首, 隨機, 循環]，不呼叫父類別那組會補系統 prev/next 的邏輯——上一首／下一首為常駐按鈕（`SLOT_BACK` / `SLOT_FORWARD`，custom session command，不受 `hasPreviousMediaItem()` / `hasNextMediaItem()` 過濾影響，清單邊界或單曲時仍固定顯示；無上/下一首時落點為重播目前曲目開頭）；播放/暫停不設 slots（走 Media3 預設 `SLOT_CENTRAL`，play/pause icon 依播放狀態切換）；隨機與循環走 `SLOT_OVERFLOW`（展開區，`CommandButton.ICON_*` 依播放模式切換：`ICON_SHUFFLE_ON/OFF`、`ICON_REPEAT_ALL/ONE`，`ICON_SHUFFLE_OFF` 為官方 disabled 色）。compact view 依 slots 判定固定為 [上一首, 播放/暫停, 下一首]，**不會重複**系統 prev/next；通知本體點擊經 `MediaSession.setSessionActivity`（contentIntent）將 App 帶回前景。
     - **重複 icon 雙層解**：方案 A（`CustomMediaNotificationProvider` 覆寫 `getMediaButtons`）處理「notification 自訂 actions」層；A2（`MusicService.sessionCallback.onPostConnect` 呼叫**廣播級** `mediaSession.setMediaButtonPreferences(buildCustomLayout(session))`，與 `setCustomLayout` 共用同一份含 SLOT_BACK/FORWARD 的按鈕清單）處理「SystemUI MediaStyle media surface」層——Media3 `MediaSessionLegacyStub`（line 1923-1930）在 media button preferences 非空且 custom layout 含 SLOT_BACK/FORWARD 時，會從 `PlaybackState.actions` 移除 `ACTION_SKIP_TO_PREVIOUS/NEXT`，使 SystemUI 不再渲染系統 prev/seekbar/next（是否生效需實機 `dumpsys media_session` 驗證）
@@ -128,6 +134,7 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"; .\gradlew.bat as
 | 通知權限（Android 13+）未授予 | 背景播放時通知不出現（音訊不受影響） | App 啟動時動態請求 POST_NOTIFICATIONS；拒絕僅影響通知與鎖屏控制 | C |
 | 逐首解析串流 URL 的切歌延遲 | 下一首開始前有解析等待（NewPipe 網路往返） | ResolvingDataSource 快取已解析結果；buffering 狀態由系統 UI 呈現；必要時改預先解析下一首 | B |
 | 搜尋續頁走 innerTube `POST youtubei/v1/search`（MWEB client context，易腐路徑） | YouTube 改版可能使續頁失效 | 2026-08 多頁實測定案：GET `results?continuation=` 會**整頁重新排序回傳**（與前頁重疊 55~100%，造成「載入更多輪迴」），續頁必須走 POST（append-only，實測重疊 0%、深頁才因結果池枯竭漸增到 5~28%）。續頁 chunk 解析為 internal 純函數，失效時可直接改寫對應函式；ViewModel 已做 append 去重＋token 未推進視為到底的防禦 | B |
+| charts innerTube 已死（`WEB_MUSIC_ANALYTICS`＋`FEmusic_analytics_charts_home` 於 2026-09 遭汰除，恆 HTTP 400；charts.youtube.com 官方 `LAUNCHED_CHART_COUNTRIES` 不含 TW） | 熱門榜單失效／空白 | 改官方 YT Music playlist「台灣百大熱門音樂影片」（owner = YouTube Music Global Charts，100 首；browseId `VLPL4fGSI1pDJn4eKyK8APGwl0S0wgyHvQyU`）。client 用 **ANDROID_VR**（免 poToken，與串流鏈同家族）。ANDROID_VR 版本屬易腐路徑，需與串流鏈一起監控——熱門榜單依規格 hardcode own ANDROID_VR profile（不共享 `InnerTubeClientProfiles`），改版時兩處版本常數互相對照更新；解析為 internal 純函數可快速改寫 | B |
 
 ## 8. 歷史決策
 
