@@ -10,6 +10,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaybackSnapshot
+import com.youxiang8727.mymediaplayer.core.domain.model.PlayQueueItem
 import com.youxiang8727.mymediaplayer.core.domain.model.PlayerController
 import com.youxiang8727.mymediaplayer.core.domain.model.RepeatMode
 import com.youxiang8727.mymediaplayer.feature.player.service.MusicService
@@ -143,6 +144,20 @@ class MediaControllerPlayerController @Inject constructor(
             .setAction(MusicService.ACTION_PLAY)
             .putExtra(MusicService.EXTRA_VIDEO_ID, videoId)
             .putExtra(MusicService.EXTRA_TITLE, title)
+        context.startForegroundService(intent)
+    }
+
+    override fun playQueue(items: List<PlayQueueItem>, startIndex: Int) {
+        // 空佇列無意義：不起服務、不觸發播放（no-op）
+        if (items.isEmpty()) return
+        val videoIds = ArrayList<String>()
+        val titles = ArrayList<String>()
+        items.forEach { videoIds += it.videoId; titles += it.title }
+        val intent = Intent(context, MusicService::class.java)
+            .setAction(MusicService.ACTION_PLAY_QUEUE)
+            .putStringArrayListExtra(MusicService.EXTRA_QUEUE_VIDEO_IDS, videoIds)
+            .putStringArrayListExtra(MusicService.EXTRA_QUEUE_TITLES, titles)
+            .putExtra(MusicService.EXTRA_QUEUE_START_INDEX, startIndex.coerceAtLeast(0))
         context.startForegroundService(intent)
     }
 

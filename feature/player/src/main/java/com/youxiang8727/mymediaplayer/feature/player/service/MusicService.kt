@@ -24,6 +24,7 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.youxiang8727.mymediaplayer.core.domain.repository.AudioStreamRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
+import com.youxiang8727.mymediaplayer.core.domain.model.PlayQueueItem
 import com.youxiang8727.mymediaplayer.feature.player.R
 import com.youxiang8727.mymediaplayer.feature.player.playback.PlaybackQueueBuilder
 import dagger.hilt.android.AndroidEntryPoint
@@ -40,7 +41,9 @@ import kotlinx.coroutines.launch
 /**
  * 前景媒體服務（Media3 MediaSessionService）。
  *
- * - 播放佇列：點播的歌在播放清單中 → 整份清單從該曲起播；否則單曲。
+ * - 播放佇列（Room 路徑）：點播的歌在播放清單中 → 整份清單從該曲起播；否則單曲。
+ * - 暫時性佇列（ACTION_PLAY_QUEUE）：熱門榜單等非 Room 清單，以 Intent 平行陣列
+ *   （videoIds / titles）直接建佇列起播，**不查 Room**。
  * - 串流 URL 以 ResolvingDataSource 於載入當下逐首解析（NewPipe），loader thread 內同步等待。
  * - 隨機/循環由 ExoPlayer 原生支援，系統通知、鎖屏、藍牙耳機鍵皆可用。
  */
@@ -126,6 +129,16 @@ class MusicService : MediaSessionService() {
                 val title = intent.getStringExtra(EXTRA_TITLE) ?: videoId
                 if (videoId.isBlank()) stopSelf() else handlePlay(videoId, title)
             }
+            ACTION_PLAY_QUEUE -> {
+                val videoIds = intent.getStringArrayListExtra(EXTRA_QUEUE_VIDEO_IDS).orEmpty()
+                val titles = intent.getStringArrayListExtra(EXTRA_QUEUE_TITLES).orEmpty()
+                val startIndex = intent.getIntExtra(EXTRA_QUEUE_START_INDEX, 0)
+                // 平行陣列 zip 回 PlayQueueItem（titles 缺項以 "" 兜底，由 builder 的 ifBlank 處理）
+                val entries = videoIds.mapIndexed { index, videoId ->
+                    PlayQueueItem(videoId = videoId, title = titles.getOrElse(index) { "" })
+                }
+                if (entries.isEmpty()) stopSelf() else handlePlayQueue(entries, startIndex)
+            }
             ACTION_STOP -> {
                 player?.stop()
                 stopSelf()
@@ -134,7 +147,7 @@ class MusicService : MediaSessionService() {
         return super.onStartCommand(intent, flags, startId)
     }
 
-    /** 載入佇列並從點播的曲目開始播放。 */
+    /** 載入佇列並從點播的曲目開始播放（Room 路徑：查播放清單）。 */
     private fun handlePlay(videoId: String, title: String) {
         serviceScope.launch {
             // 找出包含該 videoId 的播放清單，以其項目建構佇列
@@ -148,21 +161,32 @@ class MusicService : MediaSessionService() {
                 }
             }
             val queue = PlaybackQueueBuilder.build(playlistItems, videoId, title)
-            player?.apply {
-                // Save current playback modes before setting new items
-                val currentShuffleMode = shuffleModeEnabled
-                val currentRepeatMode = repeatMode
+            loadQueueAndPlay(queue)
+        }
+    }
 
-                setMediaItems(queue.entries.map { it.toMediaItem() })
-                seekTo(queue.startIndex, 0L)
+    /** 暫時性佇列（熱門榜單等非 Room 清單）：直接以傳入清單建佇列起播，不查 Room。 */
+    private fun handlePlayQueue(entries: List<PlayQueueItem>, startIndex: Int) {
+        val queue = PlaybackQueueBuilder.buildFromEntries(entries, startIndex)
+        loadQueueAndPlay(queue)
+    }
 
-                // Re-apply playback modes after setting new items
-                shuffleModeEnabled = currentShuffleMode
-                repeatMode = currentRepeatMode
+    /** 兩條路徑共用的佇列載入：setMediaItems + seekTo(start,0) + 保留 shuffle/repeat + prepare + play。 */
+    private fun loadQueueAndPlay(queue: PlaybackQueueBuilder.Queue) {
+        player?.apply {
+            // Save current playback modes before setting new items
+            val currentShuffleMode = shuffleModeEnabled
+            val currentRepeatMode = repeatMode
 
-                prepare()
-                playWhenReady = true
-            }
+            setMediaItems(queue.entries.map { it.toMediaItem() })
+            seekTo(queue.startIndex, 0L)
+
+            // Re-apply playback modes after setting new items
+            shuffleModeEnabled = currentShuffleMode
+            repeatMode = currentRepeatMode
+
+            prepare()
+            playWhenReady = true
         }
     }
 
@@ -329,6 +353,7 @@ class MusicService : MediaSessionService() {
         const val CHANNEL_ID = "music_playback"
         const val NOTIFICATION_ID = 1001
         const val ACTION_PLAY = "com.youxiang8727.mymediaplayer.action.PLAY"
+        const val ACTION_PLAY_QUEUE = "com.youxiang8727.mymediaplayer.action.PLAY_QUEUE"
         const val ACTION_STOP = "com.youxiang8727.mymediaplayer.action.STOP"
         const val COMMAND_TOGGLE_SHUFFLE = "com.youxiang8727.mymediaplayer.command.TOGGLE_SHUFFLE"
         const val COMMAND_CYCLE_REPEAT = "com.youxiang8727.mymediaplayer.command.CYCLE_REPEAT"
@@ -336,5 +361,8 @@ class MusicService : MediaSessionService() {
         const val COMMAND_NEXT = "com.youxiang8727.mymediaplayer.command.NEXT"
         const val EXTRA_VIDEO_ID = "extra_video_id"
         const val EXTRA_TITLE = "extra_title"
+        const val EXTRA_QUEUE_VIDEO_IDS = "extra_queue_video_ids"
+        const val EXTRA_QUEUE_TITLES = "extra_queue_titles"
+        const val EXTRA_QUEUE_START_INDEX = "extra_queue_start_index"
     }
 }

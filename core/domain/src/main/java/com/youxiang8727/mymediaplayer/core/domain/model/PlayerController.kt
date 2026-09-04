@@ -15,6 +15,18 @@ interface PlayerController {
     /** 播放指定影片：在播放清單中則以整份清單為佇列，否則單曲。 */
     fun play(videoId: String, title: String)
 
+    /**
+     * 播放一組**暫時性佇列**（非 Room 播放清單，例如熱門榜單）。
+     *
+     * 與 [play] 的差異：佇列內容由呼叫端提供，MusicService 不查 Room，
+     * 直接以傳入的清單作為播放佇列，並從 [startIndex] 起播。
+     * 播放模式（清單循環／單曲循環／隨機）與常駐佇列共用同一套機制。
+     *
+     * @param items 佇列項目（依顯示順序）
+     * @param startIndex 起播位置（0-based）
+     */
+    fun playQueue(items: List<PlayQueueItem>, startIndex: Int)
+
     fun togglePlayPause()
 
     fun seekToNext()

@@ -8,6 +8,7 @@ import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.usecase.AddToPlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
+import com.youxiang8727.mymediaplayer.core.domain.model.PlayQueueItem
 import com.youxiang8727.mymediaplayer.core.domain.model.PlayerController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -41,6 +42,12 @@ sealed interface PlaybackIntent {
      * 因此不走 [PlayerViewModel.startBackgroundPlayback]（該路徑依賴導航參數）。
      */
     data class Play(val videoId: String, val title: String) : PlaybackIntent
+
+    /**
+     * 播放一組暫時性佇列（熱門榜單等非 Room 清單），從 startIndex 起播整份清單。
+     * 由 activity scope 的 PlayerViewModel（app 容器層）轉 call PlayerController.playQueue。
+     */
+    data class PlayList(val entries: List<PlayQueueItem>, val startIndex: Int) : PlaybackIntent
 }
 
 @HiltViewModel
@@ -93,6 +100,7 @@ class PlayerViewModel @Inject constructor(
             is PlaybackIntent.CycleRepeat -> playerController.cycleRepeatMode()
             is PlaybackIntent.Seek -> playerController.seekTo(intent.positionMs)
             is PlaybackIntent.Play -> playerController.play(intent.videoId, intent.title)
+            is PlaybackIntent.PlayList -> playerController.playQueue(intent.entries, intent.startIndex)
         }
     }
 

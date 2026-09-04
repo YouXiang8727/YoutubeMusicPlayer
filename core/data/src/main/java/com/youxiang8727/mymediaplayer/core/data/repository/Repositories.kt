@@ -4,10 +4,13 @@ import com.youxiang8727.mymediaplayer.core.data.local.PlaylistDao
 import com.youxiang8727.mymediaplayer.core.data.local.PlaylistEntity
 import com.youxiang8727.mymediaplayer.core.data.local.toDomain
 import com.youxiang8727.mymediaplayer.core.data.local.toEntity
+import com.youxiang8727.mymediaplayer.core.data.remote.TrendingPlaylistDataSource
 import com.youxiang8727.mymediaplayer.core.data.remote.YoutubeDataSource
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.FallbackStreamResolver
+import com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
+import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import com.youxiang8727.mymediaplayer.core.domain.repository.AudioStreamRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
@@ -19,10 +22,14 @@ import kotlinx.coroutines.flow.map
 
 @Singleton
 class VideoRepositoryImpl @Inject constructor(
-    private val dataSource: YoutubeDataSource
+    private val dataSource: YoutubeDataSource,
+    private val trendingDataSource: TrendingPlaylistDataSource
 ) : VideoRepository {
     override suspend fun search(query: String, continuationToken: String?): Result<VideoSearchPage> =
         runCatching { dataSource.search(query, continuationToken) }
+
+    override suspend fun fetchTrendingSongs(region: ChartRegion): Result<List<VideoResult>> =
+        runCatching { trendingDataSource.fetch(region).getOrThrow() }
 }
 
 @Singleton
