@@ -35,6 +35,7 @@
 - **content URL 403 自動恢復**：`MusicService` 掛 `onPlayerError`（Media3 `Player.Listener`）攔截 `InvalidResponseCodeException`（responseCode==403）。策略分層：① 失效該 videoId memoize＋`resolveAudioUrl(force=true)` 重解析同曲，成功回到原 position 重試同一首；② 仍失敗 → 依 `repeatMode` 切歌（`REPEAT_MODE_ONE` 重播；`ALL/OFF` 走 `seekToNextMediaItem()`）。非 403 不攔截、維持既有 snapshot/error 顯示。併發防護 `pending403Handling`＋`retryCounts`（上限 `MAX_403_RETRY_PER_VIDEO=3`）防無限重試
 
 ### Changed
+- **歌單詳情頁點擊歌曲改為直接播放**（不再導航進播放頁）：新增 `PlaylistDetailIntent.Play(item)`——以 `_state.items`（顯示順序）建 `PlayQueueItem` 暫時性佇列，經 `PlayerController.playQueue(items, startIndex)` 從點擊曲起播（`startIndex` = 該曲 index，找不到時 0 兜底），播放後停留在歌單頁由底部 MiniPlayerBar 反映狀態；清單為空時 Snackbar 提示「清單為空，無法播放」且不觸發播放。`MainActivity` 撤除 `Routes.PLAYER` / `Routes.player()` 與 NavHost `composable(Routes.PLAYER)`（唯一入口已移除；`PlayerScreen.kt` 保留於 codebase，待 Owner 裁決是否整份刪除）
 - **App 主題色系全面重設計**：深色模式為主採用中性深灰/黑背景 (#121212) + 紅/橙系強調色 (#FF3B30)，參考 YouTube Music / Spotify 風格；淺色模式對應乾淨白/淺灰背景；保留 Android 12+ 動態配色支援
 - 色彩命名語意化：移除 `Purple80` 等實作命名，改用 Material 3 標準角色（`Primary`、`OnPrimary`、`Surface`、`SurfaceVariant`、`SurfaceContainer` 等 20+ 語意色），完整支援 M3 色彩系統
 - Typography 完整覆寫：`displayLarge/Small`、`headlineLarge/Medium/Small`、`titleLarge/Medium/Small`、`bodyLarge/Medium/Small`、`labelLarge/Medium/Small` 皆依 Material 3 規範設定字重/大小/行高，字體採系統預設 `FontFamily.Default`

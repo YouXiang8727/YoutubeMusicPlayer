@@ -3,6 +3,7 @@ package com.youxiang8727.mymediaplayer.feature.playlist
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.youxiang8727.mymediaplayer.core.domain.model.PlayQueueItem
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ClearPlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistItemsUseCase
@@ -30,6 +31,7 @@ data class PlaylistDetailUiState(
 
 sealed interface PlaylistDetailIntent {
     data class Remove(val videoId: String) : PlaylistDetailIntent
+    data class Play(val item: PlaylistItem) : PlaylistDetailIntent
     data object ClearAll : PlaylistDetailIntent
     data object ShufflePlay : PlaylistDetailIntent
 }
@@ -77,6 +79,22 @@ class PlaylistDetailViewModel @Inject constructor(
             is PlaylistDetailIntent.Remove -> viewModelScope.launch {
                 removeFromPlaylist(playlistId, intent.videoId)
                 _messages.tryEmit("已從播放清單移除")
+            }
+
+            // 點擊歌曲：以整份歌單為暫時性佇列，從點擊曲起播（不進播放頁）
+            is PlaylistDetailIntent.Play -> {
+                val items = _state.value.items
+                if (items.isEmpty()) {
+                    _messages.tryEmit("清單為空，無法播放")
+                } else {
+                    val startIndex = items
+                        .indexOfFirst { it.videoId == intent.item.videoId }
+                        .coerceAtLeast(0)
+                    playerController.playQueue(
+                        items = items.map { PlayQueueItem(videoId = it.videoId, title = it.title) },
+                        startIndex = startIndex
+                    )
+                }
             }
 
             PlaylistDetailIntent.ClearAll -> viewModelScope.launch {
