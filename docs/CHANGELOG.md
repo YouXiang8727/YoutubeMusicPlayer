@@ -30,6 +30,9 @@
 - 搜尋頁加入播放清單改為選擇清單 BottomSheet：點擊 + 按鈕彈出播放清單選擇器，支援建立新清單後直接加入
 - 播放頁加入播放清單改為選擇清單 BottomSheet：與搜尋頁共用 `PlaylistPickerSheet` 元件
 - `PlayerController` 介面與 `PlaybackSnapshot` 資料類別移至 `core:domain`，作為跨 feature 共用播放控制合約
+- 串流解析錯誤分類精細化與 403 辨識：`StreamErrorClassifier` 新增 raw HTTP 403 辨識（`\b403\b` 字元邊界），403 歸類 `TRANSIENT`（可重試／換網路，不屬永久結構性失敗）；`describe(attempts)` 依分類聚合出**不同使用者可讀提示**——bot 封鎖（「疑似遭 YouTube bot 封鎖，可稍後重試或更換網路」）、403 連結失效（「播放連結已失效，已嘗試重新取得」）、暫時性網路不穩（「網路不穩，可稍後重試」）、一般錯誤。403 歸類決策全程純 Kotlin、可單元測試
+- 強制重新解析能力：`AudioStreamRepository.resolveAudioUrl(videoId, force=false)` 新增 `force` 參數（跳過 TTL 快取強制重解析，供 content URL 過期後重試同曲）；`FallbackStreamResolver.resolve(videoId, force=false)` 支援 force 繞過快取（成功覆寫快取；全失敗清除舊快取避免死 URL 殘留）；`AudioStreamRepositoryImpl` 同步透傳 force
+- **content URL 403 自動恢復**：`MusicService` 掛 `onPlayerError`（Media3 `Player.Listener`）攔截 `InvalidResponseCodeException`（responseCode==403）。策略分層：① 失效該 videoId memoize＋`resolveAudioUrl(force=true)` 重解析同曲，成功回到原 position 重試同一首；② 仍失敗 → 依 `repeatMode` 切歌（`REPEAT_MODE_ONE` 重播；`ALL/OFF` 走 `seekToNextMediaItem()`）。非 403 不攔截、維持既有 snapshot/error 顯示。併發防護 `pending403Handling`＋`retryCounts`（上限 `MAX_403_RETRY_PER_VIDEO=3`）防無限重試
 
 ### Changed
 - **App 主題色系全面重設計**：深色模式為主採用中性深灰/黑背景 (#121212) + 紅/橙系強調色 (#FF3B30)，參考 YouTube Music / Spotify 風格；淺色模式對應乾淨白/淺灰背景；保留 Android 12+ 動態配色支援
@@ -40,6 +43,7 @@
 - Media3 升級 1.5.1 → 1.11.0（exoplayer / session 統一）
 
 ### Fixed
+- **修復 raw HTTP 403 被誤歸為 `PERMANENT`**：`StreamErrorClassifier` 原無 403 關鍵字，raw HTTP 403 落到 else 分支被誤判為永久失敗（不提示「疑似 bot 封鎖」、不被當成可重試）。新增 403 辨識歸 `TRANSIENT`，使 403 類失敗可走自動重解析／切歌恢復路徑
 - 修復 `SearchViewModelTest.FakeVideoRepository` 編譯破洞（T4）：T1 `VideoRepository` 契約新增 abstract `fetchTrendingSongs(region)` 後 search 測試 Fake 未同步補 stub，`:feature:search:testDebugUnitTest` 無法編譯；補 override 回 `Result.success(emptyList())`（並支援注入 `trendingResult` 供熱門榜單新測試使用）
 - **修復通知列重複「上一首／下一首」icon（方案 A）**：根因是 Media3 `DefaultMediaNotificationProvider.getMediaButtons`（DefaultMediaNotificationProvider.java line 457-514）會在 custom layout 之外，對未提供 SLOT_BACK/SLOT_FORWARD 按鈕的情況走 else-if 分支補上系統 `SEEK_TO_PREVIOUS` / `SEEK_TO_NEXT`，與自訂 prev/next 重複（實機 dumpsys 驗證 7 個 action）。新增 `feature:player.service.CustomMediaNotificationProvider` 覆寫 `getMediaButtons` 回傳固定序列 [上一首, 播放/暫停, 下一首, 隨機, 循環]，完全不呼叫系統 prev/next 分支——compact view 依 slots 判定固定為 [上一首(SLOT_BACK), 播放/暫停(SLOT_CENTRAL), 下一首(SLOT_FORWARD)]，展開通知再加 [隨機, 循環]。按鈕序列、custom command 落點（`onCustomCommand`）、ChannelId/ChannelName/smallIcon 設定皆不變
   - **A2 補強（media button preferences）**：方案 A 只解決「notification 自訂 actions」，但展開通知仍重複——左半是 **SystemUI 的 MediaStyle media surface**（依 `PlaybackState.actions` 渲染 prev/seekbar/next），右半是我們的 notification 自訂 actions。根因：Media3 `MediaSessionLegacyStub`（MediaSessionLegacyStub.java line 1923-1930）本應在「media button preferences 非空」且 custom layout 含 `SLOT_BACK/FORWARD` 按鈕時，從 `PlaybackState.actions` 移除 `ACTION_SKIP_TO_PREVIOUS/NEXT`，但我們先前只用 `setCustomLayout` 未設 media button preferences → legacy stub 偵測不到 → SystemUI 照畫。A2：在 `MusicService.sessionCallback.onPostConnect` 於既有 `setCustomLayout` 旁新增**廣播級** `mediaSession.setMediaButtonPreferences(buildCustomLayout(session))`（無 controller 參數，`@UnstableApi`；與 `setCustomLayout` 共用同一份含 SLOT_BACK/FORWARD 的按鈕清單），使 legacy stub 正確偵測並移除系統 prev/next。效果需 A 實機 `dumpsys media_session` 驗證 `actions` 不再含 `ACTION_SKIP_TO_PREVIOUS/NEXT`（若生效）
