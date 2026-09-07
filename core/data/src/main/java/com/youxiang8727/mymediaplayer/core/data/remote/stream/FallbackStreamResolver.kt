@@ -38,8 +38,9 @@ class FallbackStreamResolver @Inject constructor(
     /**
      * @param videoId 影片 ID
      * @param force 是否強制重新解析。預設 false（命中 TTL 快取直接回傳）；
-     *   true 時**繞過快取**強制重跑所有來源，並以新結果（含失敗）覆寫/更新該 videoId 的快取——
-     *   用於 content URL 過期（HTTP 403）後重試同曲，避免 session 內死 URL 卡住。
+     *   true 時**繞過快取**強制重跑所有來源——成功以新結果覆寫快取（換新鮮 URL），
+     *   全數失敗則清除舊快取（舊 URL 已驗證失效，避免殘留被再命中）。
+     *   用於 content URL 過期（HTTP 403）後重試同曲。
      */
     suspend fun resolve(videoId: String, force: Boolean = false): Result<String> = withContext(dispatchers.io) {
         if (!force) {
