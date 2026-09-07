@@ -15,10 +15,10 @@ interface VideoRepository {
     suspend fun search(query: String, continuationToken: String? = null): Result<VideoSearchPage>
 
     /**
-     * 抓取台灣官方熱門音樂 playlist（YouTube Music Global Charts「台灣百大熱門音樂影片」，
-     * 100 首）。此資料源採**分頁聚合至整份**——內部迴圈抓各頁並累加去重，
+     * 抓取指定區域的熱門音樂 playlist（YouTube Music Global Charts 官方頻道，
+     * 100 首、每週更新）。此資料源採**分頁聚合至整份**——內部迴圈抓各頁並累加去重，
      * 回傳為聚合後的完整清單（~100 首），非單頁。
-     * @param region 榜單區域（目前僅 [ChartRegion.TAIWAN]，無官方來源的區域）
+     * @param region 榜單區域（[ChartRegion.DISPLAY_ORDER] 定義顯示順序）
      */
     suspend fun fetchTrendingSongs(region: ChartRegion): Result<List<VideoResult>>
 }

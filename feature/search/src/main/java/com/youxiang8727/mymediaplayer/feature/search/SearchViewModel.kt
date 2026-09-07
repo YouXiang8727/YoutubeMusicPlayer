@@ -26,6 +26,13 @@ import kotlinx.coroutines.launch
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 
+/** 單一區域的熱門榜單狀態。 */
+data class TrendingState(
+    val items: List<VideoResult> = emptyList(),
+    val loading: Boolean = false,
+    val error: String? = null
+)
+
 data class SearchUiState(
     val query: String = "",
     val isLoading: Boolean = false,
@@ -34,10 +41,8 @@ data class SearchUiState(
     val isLoadingMore: Boolean = false,
     val error: String? = null,
     val searched: Boolean = false,
-    // 熱門音樂榜單（空狀態區塊）：init 自動載入台灣榜單，僅在 searched == false 時顯示
-    val trendingItems: List<VideoResult> = emptyList(),
-    val trendingLoading: Boolean = false,
-    val trendingError: String? = null
+    // 熱門音樂榜單（空狀態區塊）：init 自動載入各區域榜單，僅在 searched == false 時顯示
+    val trendingByRegion: Map<ChartRegion, TrendingState> = emptyMap()
 )
 
 sealed interface SearchIntent {
@@ -86,27 +91,50 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    /** 抓取台灣熱門音樂榜單；失敗僅寫 trendingError（UI 內嵌重試），不擋搜尋。 */
+    /**
+     * 抓取各區域熱門音樂榜單；各區域獨立載入，失敗僅寫入對應 [TrendingState.error]，不擋搜尋。
+     *
+     * 重入策略（取其簡且穩）：「各區域自己的 loading 旗標即重入 guard」——本次呼叫只對
+     * 未載入中（`loading == false`，含失敗待重試）的區域發起抓取，已載入中的區域不重複發起，
+     * 避免快速重觸發造成重複網路請求（每次抓取皆為多頁分頁聚合，成本高）。init 首載時所有
+     * 區域皆未載入故全抓；[SearchIntent.TrendingRetry] 同樣整批重抓非載入中的區域。
+     * 結果以 `trendingByRegion + (region to ...)` 覆蓋單一區域，其餘區域既有內容不受影響
+     * （區域獨立）。
+     */
     private fun fetchTrending() {
-        if (_state.value.trendingLoading) return
-        _state.update { it.copy(trendingLoading = true, trendingError = null) }
+        val current = _state.value.trendingByRegion
+        val toFetch = ChartRegion.DISPLAY_ORDER.filter { region ->
+            current[region]?.loading != true
+        }
+        if (toFetch.isEmpty()) return
+        _state.update { st ->
+            st.copy(
+                trendingByRegion = st.trendingByRegion +
+                    toFetch.associateWith { TrendingState(loading = true) }
+            )
+        }
         viewModelScope.launch {
-            fetchTrendingSongs(ChartRegion.TAIWAN)
-                .onSuccess { list ->
-                    _state.update {
-                        it.copy(trendingLoading = false, trendingItems = list, trendingError = null)
-                    }
+            for (region in toFetch) {
+                launch {
+                    fetchTrendingSongs(region)
+                        .onSuccess { list ->
+                            _state.update { st ->
+                                st.copy(
+                                    trendingByRegion = st.trendingByRegion +
+                                        (region to TrendingState(items = list))
+                                )
+                            }
+                        }
+                        .onFailure { e ->
+                            _state.update { st ->
+                                st.copy(
+                                    trendingByRegion = st.trendingByRegion +
+                                        (region to TrendingState(error = e.message))
+                                )
+                            }
+                        }
                 }
-                .onFailure { e ->
-                    // 失敗清空榜單，讓 error 狀態成為唯一權威（重試成功後重新填回）
-                    _state.update {
-                        it.copy(
-                            trendingLoading = false,
-                            trendingItems = emptyList(),
-                            trendingError = e.message
-                        )
-                    }
-                }
+            }
         }
     }
 

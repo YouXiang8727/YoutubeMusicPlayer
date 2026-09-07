@@ -28,9 +28,9 @@ class FetchTrendingSongsUseCase @Inject constructor(
     private val repository: VideoRepository
 ) {
     /**
-     * 抓取台灣官方熱門音樂榜單（YouTube Music Global Charts「台灣百大熱門音樂影片」，
+     * 抓取指定區域的熱門音樂榜單（YouTube Music Global Charts 官方頻道 playlist，
      * 內部分頁聚合至整份，回傳完整清單）。
-     * @param region 榜單區域（目前僅台灣）
+     * @param region 榜單區域（[ChartRegion.DISPLAY_ORDER] 定義顯示順序）
      */
     suspend operator fun invoke(region: ChartRegion): Result<List<VideoResult>> =
         repository.fetchTrendingSongs(region)
