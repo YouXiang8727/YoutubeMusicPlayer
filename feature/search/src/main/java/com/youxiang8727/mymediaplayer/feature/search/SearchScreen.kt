@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlayQueueItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
@@ -77,8 +78,8 @@ fun SearchScreen(
     var showCreateDialog by remember { mutableStateOf(false) }
     // 待建立清單後加入的影片（BottomSheet 關閉後仍需保留）
     var pendingCreateVideo by remember { mutableStateOf<VideoResult?>(null) }
-    // 熱門榜單 rail ⇄ 完整清單切換（同 feature:search 內以 state 切換，不新增 nav route）
-    var showFullChart by remember { mutableStateOf(false) }
+    // 展開完整榜單的區域（null = 全部收合成 rail 並排）（同 feature:search 內以 state 切換，不新增 nav route）
+    var fullChartRegion by remember { mutableStateOf<ChartRegion?>(null) }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         Column(
@@ -112,14 +113,39 @@ fun SearchScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(8.dp))
-                    TrendingSection(
-                        state = state,
-                        showFullChart = showFullChart,
-                        onShowFullChart = { showFullChart = true },
-                        onBackToRail = { showFullChart = false },
-                        onRetry = { onIntent(SearchIntent.TrendingRetry) },
-                        onPlayChartQueue = onPlayChartQueue
-                    )
+                    val expandedRegion = fullChartRegion
+                    if (expandedRegion != null) {
+                        // 單一區域完整榜單：TrendingSection 內部的 ChartFullList LazyColumn
+                        // 直接掛在普通 Column 下（無垂直 LazyColumn 巢狀）
+                        TrendingSection(
+                            title = expandedRegion.displayTitle(),
+                            trending = state.trendingByRegion[expandedRegion] ?: TrendingState(),
+                            showFullChart = true,
+                            onShowFullChart = {},
+                            onBackToRail = { fullChartRegion = null },
+                            onRetry = { onIntent(SearchIntent.TrendingRetry) },
+                            onPlayChartQueue = onPlayChartQueue
+                        )
+                    } else {
+                        // 四區域 rail 並排：垂直 LazyColumn 承載，避免 4 條 rail 超出螢幕高度
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(ChartRegion.DISPLAY_ORDER) { region ->
+                                TrendingSection(
+                                    title = region.displayTitle(),
+                                    trending = state.trendingByRegion[region] ?: TrendingState(),
+                                    showFullChart = false,
+                                    onShowFullChart = { fullChartRegion = region },
+                                    onBackToRail = {},
+                                    onRetry = { onIntent(SearchIntent.TrendingRetry) },
+                                    onPlayChartQueue = onPlayChartQueue
+                                )
+                            }
+                            item { Spacer(Modifier.height(24.dp)) }
+                        }
+                    }
                 }
 
                 state.isLoading -> Box(
@@ -201,14 +227,23 @@ fun SearchScreen(
 /** 熱門榜單 rail 顯示筆數上限（詳情完整清單不截斷）。 */
 private const val TRENDING_RAIL_LIMIT = 10
 
+/** 各區域榜單的顯示標題。 */
+private fun ChartRegion.displayTitle(): String = when (this) {
+    ChartRegion.TAIWAN -> "台灣熱門音樂"
+    ChartRegion.WESTERN -> "西洋熱門音樂"
+    ChartRegion.JAPAN -> "日本熱門音樂"
+    ChartRegion.KOREA -> "韓國熱門音樂"
+}
+
 /**
- * 熱門音樂榜單區塊（僅在空狀態 `searched == false` 顯示）。
+ * 單一區域的熱門音樂榜單區塊（僅在空狀態 `searched == false` 顯示）。
  * rail（前 [TRENDING_RAIL_LIMIT] 筆）⇄ 完整清單兩態以 [showFullChart] 切換；
  * 載入中／失敗（重試）／空榜單三態都有對應 UI。
  */
 @Composable
 private fun TrendingSection(
-    state: SearchUiState,
+    title: String,
+    trending: TrendingState,
     showFullChart: Boolean,
     onShowFullChart: () -> Unit,
     onBackToRail: () -> Unit,
@@ -216,7 +251,7 @@ private fun TrendingSection(
     onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit
 ) {
     when {
-        state.trendingLoading -> Box(
+        trending.loading -> Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 48.dp),
@@ -233,13 +268,13 @@ private fun TrendingSection(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回熱門列表")
                     }
                     Text(
-                        "台灣熱門音樂",
+                        title,
                         style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.weight(1f)
                     )
                 } else {
                     Text(
-                        "台灣熱門音樂",
+                        title,
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.weight(1f)
                     )
@@ -248,12 +283,12 @@ private fun TrendingSection(
             }
 
             when {
-                state.trendingError != null -> TrendingError(
-                    message = state.trendingError,
+                trending.error != null -> TrendingError(
+                    message = trending.error,
                     onRetry = onRetry
                 )
 
-                state.trendingItems.isEmpty() -> Box(
+                trending.items.isEmpty() -> Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 32.dp),
@@ -267,12 +302,12 @@ private fun TrendingSection(
                 }
 
                 showFullChart -> ChartFullList(
-                    items = state.trendingItems,
+                    items = trending.items,
                     onPlayChartQueue = onPlayChartQueue
                 )
 
                 else -> ChartRail(
-                    items = state.trendingItems,
+                    items = trending.items,
                     onPlayChartQueue = onPlayChartQueue
                 )
             }
@@ -758,8 +793,15 @@ private fun SearchScreenResultsLoadingMorePreview() {
 }
 
 /** 產生榜單 Preview 用假資料（縮圖留空以主題色塊呈現，與既有 Preview 慣例一致）。 */
-private fun trendingPreviewItems(count: Int): List<VideoResult> =
-    List(count) { i -> VideoResult("trending-$i", "台灣熱門音樂 Top ${i + 1}", "", "歌手 $i") }
+private fun trendingPreviewItems(region: ChartRegion, count: Int): List<VideoResult> =
+    List(count) { i ->
+        VideoResult(
+            "trending-${region.name}-$i",
+            "${region.displayTitle()} Top ${i + 1}",
+            "",
+            "歌手 $i"
+        )
+    }
 
 @Preview(
     showBackground = true,
@@ -782,13 +824,18 @@ private fun trendingPreviewItems(count: Int): List<VideoResult> =
 @Composable
 private fun SearchScreenTrendingLoadingPreview() {
     MyMediaPlayerTheme {
-        TrendingSection(
-            state = SearchUiState(trendingLoading = true),
-            showFullChart = false,
-            onShowFullChart = {},
-            onBackToRail = {},
-            onRetry = {},
-            onPlayChartQueue = { _, _ -> }
+        // 初始載入：全部區域皆在載入中，驗證各區域獨立 spinner
+        SearchScreen(
+            state = SearchUiState(
+                trendingByRegion = ChartRegion.DISPLAY_ORDER.associateWith {
+                    TrendingState(loading = true)
+                }
+            ),
+            playlists = emptyList(),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {},
+            onPlayVideo = {},
+            onCreatePlaylistAndAdd = { _, _ -> }
         )
     }
 }
@@ -814,14 +861,23 @@ private fun SearchScreenTrendingLoadingPreview() {
 @Composable
 private fun SearchScreenTrendingRailPreview() {
     MyMediaPlayerTheme {
-        // 12 筆 > rail 上限 10，驗證截斷只顯示前 10 筆
-        TrendingSection(
-            state = SearchUiState(trendingItems = trendingPreviewItems(12)),
-            showFullChart = false,
-            onShowFullChart = {},
-            onBackToRail = {},
-            onRetry = {},
-            onPlayChartQueue = { _, _ -> }
+        // 台灣 12 筆 > rail 上限 10，驗證截斷只顯示前 10 筆；西洋 5 筆並排驗證第二條 rail
+        SearchScreen(
+            state = SearchUiState(
+                trendingByRegion = mapOf(
+                    ChartRegion.TAIWAN to TrendingState(
+                        items = trendingPreviewItems(ChartRegion.TAIWAN, 12)
+                    ),
+                    ChartRegion.WESTERN to TrendingState(
+                        items = trendingPreviewItems(ChartRegion.WESTERN, 5)
+                    )
+                )
+            ),
+            playlists = emptyList(),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {},
+            onPlayVideo = {},
+            onCreatePlaylistAndAdd = { _, _ -> }
         )
     }
 }
@@ -847,8 +903,10 @@ private fun SearchScreenTrendingRailPreview() {
 @Composable
 private fun SearchScreenTrendingFullChartPreview() {
     MyMediaPlayerTheme {
+        // 單一區域完整榜單（50 筆 > rail 上限，驗證完整清單不截斷）
         TrendingSection(
-            state = SearchUiState(trendingItems = trendingPreviewItems(50)),
+            title = ChartRegion.TAIWAN.displayTitle(),
+            trending = TrendingState(items = trendingPreviewItems(ChartRegion.TAIWAN, 50)),
             showFullChart = true,
             onShowFullChart = {},
             onBackToRail = {},
@@ -879,13 +937,21 @@ private fun SearchScreenTrendingFullChartPreview() {
 @Composable
 private fun SearchScreenTrendingErrorPreview() {
     MyMediaPlayerTheme {
-        TrendingSection(
-            state = SearchUiState(trendingError = "charts.youtube.com (HTTP 403)"),
-            showFullChart = false,
-            onShowFullChart = {},
-            onBackToRail = {},
-            onRetry = {},
-            onPlayChartQueue = { _, _ -> }
+        // 台灣載入失敗（顯示重試）、西洋正常載入：驗證單一區域失敗不影響其他區域
+        SearchScreen(
+            state = SearchUiState(
+                trendingByRegion = mapOf(
+                    ChartRegion.TAIWAN to TrendingState(error = "charts.youtube.com (HTTP 403)"),
+                    ChartRegion.WESTERN to TrendingState(
+                        items = trendingPreviewItems(ChartRegion.WESTERN, 5)
+                    )
+                )
+            ),
+            playlists = emptyList(),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {},
+            onPlayVideo = {},
+            onCreatePlaylistAndAdd = { _, _ -> }
         )
     }
 }
