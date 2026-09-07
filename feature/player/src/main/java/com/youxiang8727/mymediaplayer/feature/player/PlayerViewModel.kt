@@ -1,33 +1,13 @@
 package com.youxiang8727.mymediaplayer.feature.player
 
-import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
-import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
-import com.youxiang8727.mymediaplayer.core.domain.usecase.AddToPlaylistUseCase
-import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
-import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.model.PlayQueueItem
 import com.youxiang8727.mymediaplayer.core.domain.model.PlayerController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.launch
 
-data class PlayerUiState(
-    val videoId: String = "",
-    val title: String = ""
-)
-
-/** 迷你播放列 / 播放頁共用的播放意圖。[Play] 另供外部列表（如搜尋結果）直接起播。 */
+/** 迷你播放列共用的播放意圖。[Play] 另供外部列表（如搜尋結果）直接起播。 */
 sealed interface PlaybackIntent {
     data object TogglePlayPause : PlaybackIntent
     data object Next : PlaybackIntent
@@ -37,9 +17,9 @@ sealed interface PlaybackIntent {
     data class Seek(val positionMs: Long) : PlaybackIntent
 
     /**
-     * 直接起播指定影片，不導航至播放頁。
-     * 供外部列表（activity scope ViewModel，無 SavedStateHandle 導航參數）呼叫，
-     * 因此不走 [PlayerViewModel.startBackgroundPlayback]（該路徑依賴導航參數）。
+     * 直接起播指定影片，不導航至播放頁（本專案已無全螢幕播放頁）。
+     * 由 activity scope 的 PlayerViewModel（app 容器層）轉 call PlayerController.play，
+     * 供外部列表（如搜尋結果）直接起播、不導航至播放頁。
      */
     data class Play(val videoId: String, val title: String) : PlaybackIntent
 
@@ -52,43 +32,12 @@ sealed interface PlaybackIntent {
 
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
-    savedStateHandle: SavedStateHandle,
-    private val addToPlaylist: AddToPlaylistUseCase,
-    private val createPlaylist: CreatePlaylistUseCase,
-    private val playerController: PlayerController,
-    observePlaylists: ObservePlaylistsUseCase
+    private val playerController: PlayerController
 ) : ViewModel() {
-
-    val state: PlayerUiState = PlayerUiState(
-        videoId = savedStateHandle.get<String>("videoId").orEmpty(),
-        title = savedStateHandle.get<String>("title").orEmpty()
-    )
 
     /** 來自 MediaSession 的即時播放狀態（MiniPlayerBar 與通知共用同一狀態源）。 */
     val playback: StateFlow<com.youxiang8727.mymediaplayer.core.domain.model.PlaybackSnapshot> =
         playerController.playback
-
-    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
-    val messages: SharedFlow<String> = _messages.asSharedFlow()
-
-    private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
-    val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
-
-    init {
-        observePlaylists()
-            .onEach { list -> _playlists.value = list }
-            .launchIn(viewModelScope)
-    }
-
-    fun startBackgroundPlayback() {
-        playerController.play(state.videoId, state.title.ifBlank { state.videoId })
-        _messages.tryEmit("已啟動背景播放")
-    }
-
-    fun stopBackgroundPlayback() {
-        playerController.stop()
-        _messages.tryEmit("已停止背景播放")
-    }
 
     /** 給 MiniPlayerBar（activity scope）使用；[PlaybackIntent.Play] 供外部列表直接起播。 */
     fun onPlaybackIntent(intent: PlaybackIntent) {
@@ -101,25 +50,6 @@ class PlayerViewModel @Inject constructor(
             is PlaybackIntent.Seek -> playerController.seekTo(intent.positionMs)
             is PlaybackIntent.Play -> playerController.play(intent.videoId, intent.title)
             is PlaybackIntent.PlayList -> playerController.playQueue(intent.entries, intent.startIndex)
-        }
-    }
-
-    fun onAddToPlaylist(playlistId: Long, item: PlaylistItem) {
-        viewModelScope.launch {
-            runCatching { addToPlaylist(playlistId, item) }
-                .onSuccess { _messages.tryEmit("已加入播放清單") }
-                .onFailure { _messages.tryEmit("加入失敗：${it.message}") }
-        }
-    }
-
-    fun createPlaylistAndAdd(name: String, item: PlaylistItem) {
-        viewModelScope.launch {
-            runCatching {
-                val newId = createPlaylist(name)
-                addToPlaylist(newId, item.copy(playlistId = newId))
-            }
-                .onSuccess { _messages.tryEmit("已建立「$name」並加入歌曲") }
-                .onFailure { _messages.tryEmit("建立失敗：${it.message}") }
         }
     }
 }
