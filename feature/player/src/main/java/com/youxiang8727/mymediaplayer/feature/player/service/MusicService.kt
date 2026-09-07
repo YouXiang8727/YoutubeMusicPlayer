@@ -8,9 +8,11 @@ import android.os.Bundle
 import android.os.IBinder
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -57,6 +59,18 @@ class MusicService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /**
+     * session 級 memoize：每 videoId 已解析的音訊 URL，避免重複解析。
+     * 由 [onPlayerError] 在 content URL 403 失效時針對該 videoId 失效（移除）並強制重解析。
+     */
+    private val resolvedUrls = ConcurrentHashMap<String, String>()
+
+    /** 403 處理中的 videoId 集合（reentrancy guard）：同一 videoId 不重複觸發重試。 */
+    private val pending403Handling = ConcurrentHashMap.newKeySet<String>()
+
+    /** 同一 videoId 的連續 403 自動重試次數（bounded retry，防無限迴圈）。 */
+    private val retryCounts = ConcurrentHashMap<String, Int>()
 
     override fun onCreate() {
         super.onCreate()
@@ -106,6 +120,23 @@ class MusicService : MediaSessionService() {
             }
             override fun onRepeatModeChanged(repeatMode: Int) {
                 refreshNotificationCustomLayout()
+            }
+        })
+
+        // 播放錯誤攔截：content URL 403（簽名 URL 過期/被撤銷）時自動恢復（需求 2+3）
+        newPlayer.addListener(object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                if (isContentUrl403(error)) {
+                    onContentUrl403(error)
+                }
+                // 非 403 錯誤不攔截：維持既有 snapshot/error 顯示機制，由 UI 呈現。
+            }
+
+            // 曲目成功進入播放中（READY）→ 重設該曲 403 重試次數，避免舊的高計數殘留
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) {
+                    newPlayer.currentMediaItem?.mediaId?.let { retryCounts.remove(it) }
+                }
             }
         })
     }
@@ -297,13 +328,12 @@ class MusicService : MediaSessionService() {
      * Resolver 於 ExoPlayer loader thread 呼叫，可同步做網路工作。
      */
     private fun resolvingDataSourceFactory(): DataSource.Factory {
-        val resolvedUrls = ConcurrentHashMap<String, String>()
         val resolver = ResolvingDataSource.Resolver { dataSpec ->
             val videoId = dataSpec.uri.getQueryParameter("v")
                 ?: dataSpec.uri.lastPathSegment
                 ?: throw IOException("無法從 URI 取得 videoId：${dataSpec.uri}")
             val url = resolvedUrls.getOrPut(videoId) {
-                runBlockingResolve(videoId)
+                runBlockingResolve(videoId, force = false)
             }
             dataSpec.buildUpon().setUri(url).build()
         }
@@ -313,11 +343,101 @@ class MusicService : MediaSessionService() {
         )
     }
 
-    private fun runBlockingResolve(videoId: String): String =
+    private fun runBlockingResolve(videoId: String, force: Boolean): String =
         kotlinx.coroutines.runBlocking {
-            streamResolver.resolveAudioUrl(videoId)
+            streamResolver.resolveAudioUrl(videoId, force)
                 .getOrElse { throw IOException("解析串流失敗：${it.message}", it) }
         }
+
+    // ── 播放錯誤：content URL 403 自動恢復（需求 2 + 3）──
+
+    /**
+     * 判斷播放錯誤是否為「內容 URL 403」：
+     * 沿 cause chain 找 Media3 [HttpDataSource.InvalidResponseCodeException] 且 responseCode == 403
+     * （即已解析的 googlevideo 簽名 URL 過期／被撤銷，播放當下被 DefaultHttpDataSource 以 403 浮出）。
+     */
+    private fun isContentUrl403(error: PlaybackException): Boolean {
+        var cause: Throwable? = error
+        while (cause != null) {
+            if (cause is HttpDataSource.InvalidResponseCodeException && cause.responseCode == 403) {
+                return true
+            }
+            cause = cause.cause
+        }
+        return false
+    }
+
+    /**
+     * 處理 content URL 403：
+     * 1. 失效該 videoId 的 memoized URL，強制重新解析同曲（需求 2）；成功 → 重試同一首。
+     * 2. 重新解析仍失敗 → 依目前 repeatMode 切歌（需求 3）：
+     *    - REPEAT_MODE_ONE：重播同一首。
+     *    - REPEAT_MODE_ALL / OFF：seekToNextMediaItem（無下一首則重播或自然停，依播放模式）。
+     * 併發防護：
+     * - pending403Handling 防同一 videoId 併發重入；
+     * - retryCounts 限制同一 videoId 連續 403 自動重試次數（[MAX_403_RETRY_PER_VIDEO]），
+     *   超過即停止自動處理、讓錯誤交由既有 snapshot/error 機制顯示，避免無限重試迴圈。
+     */
+    private fun onContentUrl403(error: PlaybackException) {
+        val p = player ?: return
+        val videoId = p.currentMediaItem?.mediaId ?: return
+        if (!pending403Handling.add(videoId)) return // 已在處理中，忽略重入
+
+        val retry = (retryCounts[videoId] ?: 0) + 1
+        if (retry > MAX_403_RETRY_PER_VIDEO) {
+            // 超出上限：不再自動重試，讓錯誤浮現給 UI 顯示（同時清除 guard 讓後續手動重播可用）
+            retryCounts.remove(videoId)
+            pending403Handling.remove(videoId)
+            return
+        }
+        retryCounts[videoId] = retry
+
+        serviceScope.launch {
+            try {
+                // 需求 2：失效 memoize + 強制重解析
+                resolvedUrls.remove(videoId)
+                val newUrl = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    streamResolver.resolveAudioUrl(videoId, force = true)
+                        .getOrElse { throw IOException("重新解析失敗：${it.message}", it) }
+                }
+                resolvedUrls[videoId] = newUrl
+                // 重試同一首：回到原 position
+                val position = p.currentPosition.coerceAtLeast(0L)
+                p.prepare()
+                if (position > 0L) p.seekTo(position)
+                p.playWhenReady = true
+            } catch (e: Exception) {
+                // 重新解析仍失敗 → 需求 3：依播放模式切歌
+                advanceOn403(p, videoId)
+            } finally {
+                pending403Handling.remove(videoId)
+            }
+        }
+    }
+
+    /** 重新解析仍失敗時，依 repeatMode 切歌。 */
+    private fun advanceOn403(p: ExoPlayer, videoId: String) {
+        when (p.repeatMode) {
+            Player.REPEAT_MODE_ONE -> {
+                // 單曲循環：重播同一首（prepare 會重新載入、重新解析）
+                p.prepare()
+                p.playWhenReady = true
+            }
+            else -> {
+                // ALL / OFF：優先下一首
+                if (p.hasNextMediaItem()) {
+                    p.prepare()
+                    p.seekToNextMediaItem()
+                    p.playWhenReady = true
+                } else {
+                    // 無下一首：REPEAT_MODE_ALL 會由 ExoPlayer 自動回繞第一首；
+                    // REPEAT_MODE_OFF 則準備目前曲目（重試，最終仍失敗時由 UI 顯示錯誤）。
+                    p.prepare()
+                    p.playWhenReady = true
+                }
+            }
+        }
+    }
 
     private fun PlaybackQueueBuilder.QueueEntry.toMediaItem(): MediaItem =
         MediaItem.Builder()
@@ -364,5 +484,11 @@ class MusicService : MediaSessionService() {
         const val EXTRA_QUEUE_VIDEO_IDS = "extra_queue_video_ids"
         const val EXTRA_QUEUE_TITLES = "extra_queue_titles"
         const val EXTRA_QUEUE_START_INDEX = "extra_queue_start_index"
+
+        /**
+         * 同一 videoId 連續 403 自動重試的上限。超出即停止自動處理、讓錯誤交由 UI 顯示，
+         * 防止網路/URL 持續給 403 時無限重試迴圈。成功重解析或切至新曲時 [retryCounts] 會被重設。
+         */
+        const val MAX_403_RETRY_PER_VIDEO = 3
     }
 }
