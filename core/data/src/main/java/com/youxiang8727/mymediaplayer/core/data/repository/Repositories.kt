@@ -36,8 +36,8 @@ class VideoRepositoryImpl @Inject constructor(
 class AudioStreamRepositoryImpl @Inject constructor(
     private val fallbackResolver: FallbackStreamResolver
 ) : AudioStreamRepository {
-    override suspend fun resolveAudioUrl(videoId: String): Result<String> =
-        fallbackResolver.resolve(videoId)
+    override suspend fun resolveAudioUrl(videoId: String, force: Boolean): Result<String> =
+        fallbackResolver.resolve(videoId, force)
 }
 
 @Singleton
