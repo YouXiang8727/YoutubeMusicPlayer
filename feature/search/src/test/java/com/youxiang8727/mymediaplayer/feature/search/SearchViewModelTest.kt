@@ -46,15 +46,21 @@ class SearchViewModelTest {
         Dispatchers.resetMain()
     }
 
-    /** 依 token 區分初次搜尋與載入更多回傳；記錄呼叫次數與收到的 token。 */
+    /**
+     * 依 token 區分初次搜尋與載入更多回傳；記錄呼叫次數與收到的 token。
+     * 熱門榜單：預設所有 region 回傳同一 [trendingResult]；可用 [trendingResultsByRegion]
+     * 針對單一 region 覆寫結果（區域獨立性測試用）。記錄收到的 region 供「全區域皆被抓取」斷言。
+     */
     private class FakeVideoRepository(
         var firstPageResult: Result<VideoSearchPage> = Result.success(VideoSearchPage(emptyList())),
         var loadMoreResult: Result<VideoSearchPage> = Result.success(VideoSearchPage(emptyList())),
-        var trendingResult: Result<List<VideoResult>> = Result.success(emptyList())
+        var trendingResult: Result<List<VideoResult>> = Result.success(emptyList()),
+        var trendingResultsByRegion: Map<ChartRegion, Result<List<VideoResult>>> = emptyMap()
     ) : VideoRepository {
         var searchCalls = 0
         val receivedTokens = mutableListOf<String?>()
         var trendingCalls = 0
+        val receivedTrendingRegions = mutableListOf<ChartRegion>()
 
         override suspend fun search(query: String, continuationToken: String?): Result<VideoSearchPage> {
             searchCalls++
@@ -64,7 +70,8 @@ class SearchViewModelTest {
 
         override suspend fun fetchTrendingSongs(region: ChartRegion): Result<List<VideoResult>> {
             trendingCalls++
-            return trendingResult
+            receivedTrendingRegions += region
+            return trendingResultsByRegion[region] ?: trendingResult
         }
     }
 
@@ -259,54 +266,103 @@ class SearchViewModelTest {
     }
 
     @Test
-    fun `init 自動載入台灣熱門榜單成功寫入 trendingItems`() {
+    fun `init 自動載入各區域熱門榜單成功寫入 trendingByRegion`() {
         val repo = FakeVideoRepository(
             trendingResult = Result.success(listOf(v1, v2, v3))
         )
         val h = buildHarness(repo)
         dispatcher.scheduler.advanceUntilIdle()
 
-        assertEquals(listOf(v1, v2, v3), h.vm.state.value.trendingItems)
-        assertTrue(!h.vm.state.value.trendingLoading)
-        assertNull(h.vm.state.value.trendingError)
+        // 所有區域都應有結果（FakeRepository 對任何 region 回傳相同結果）
+        for (region in ChartRegion.DISPLAY_ORDER) {
+            assertEquals(
+                listOf(v1, v2, v3),
+                h.vm.state.value.trendingByRegion[region]?.items
+            )
+            assertNull(h.vm.state.value.trendingByRegion[region]?.error)
+        }
         // init 載入不干擾搜尋狀態（仍為空狀態）
         assertTrue(!h.vm.state.value.searched)
-        assertEquals(1, h.repo.trendingCalls)
+        assertEquals(ChartRegion.DISPLAY_ORDER.size, h.repo.trendingCalls)
     }
 
     @Test
-    fun `init 熱門榜單載入失敗寫入 trendingError 且 items 為空`() {
+    fun `init 熱門榜單載入失敗寫入各區域 error 且 items 為空`() {
         val repo = FakeVideoRepository(
             trendingResult = Result.failure(RuntimeException("charts down"))
         )
         val h = buildHarness(repo)
         dispatcher.scheduler.advanceUntilIdle()
 
-        assertEquals("charts down", h.vm.state.value.trendingError)
-        assertEquals(emptyList<VideoResult>(), h.vm.state.value.trendingItems)
-        assertTrue(!h.vm.state.value.trendingLoading)
+        for (region in ChartRegion.DISPLAY_ORDER) {
+            assertEquals("charts down", h.vm.state.value.trendingByRegion[region]?.error)
+            assertEquals(emptyList<VideoResult>(), h.vm.state.value.trendingByRegion[region]?.items)
+        }
         assertNull(h.vm.state.value.error) // 不污染搜尋錯誤欄位
     }
 
     @Test
-    fun `TrendingRetry 重試成功清除錯誤並寫入榜單`() {
+    fun `init 依 DISPLAY_ORDER 抓取所有區域各一次`() {
+        val repo = FakeVideoRepository()
+        val h = buildHarness(repo)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        // fake 記錄收到的 region：應恰好涵蓋 DISPLAY_ORDER 所有區域、各一次
+        assertEquals(ChartRegion.DISPLAY_ORDER.toSet(), h.repo.receivedTrendingRegions.toSet())
+        assertEquals(ChartRegion.DISPLAY_ORDER.size, h.repo.receivedTrendingRegions.size)
+        assertEquals(ChartRegion.DISPLAY_ORDER.size, h.repo.trendingCalls)
+        // 全區域皆載入完成（無 error）
+        for (region in ChartRegion.DISPLAY_ORDER) {
+            assertNull(h.vm.state.value.trendingByRegion[region]?.error)
+        }
+    }
+
+    @Test
+    fun `單一區域失敗不影響其他區域的榜單內容`() {
+        // 僅 JAPAN 失敗，其餘區域成功：驗證區域獨立性
+        val repo = FakeVideoRepository(
+            trendingResult = Result.success(listOf(v1, v2)),
+            trendingResultsByRegion = mapOf(
+                ChartRegion.JAPAN to Result.failure(RuntimeException("jp down"))
+            )
+        )
+        val h = buildHarness(repo)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        // 失敗區域：error 寫入、items 為空
+        assertEquals("jp down", h.vm.state.value.trendingByRegion[ChartRegion.JAPAN]?.error)
+        assertEquals(emptyList<VideoResult>(), h.vm.state.value.trendingByRegion[ChartRegion.JAPAN]?.items)
+        // 其餘區域不受影響：items 完好、無 error
+        for (region in ChartRegion.DISPLAY_ORDER.filter { it != ChartRegion.JAPAN }) {
+            assertEquals(listOf(v1, v2), h.vm.state.value.trendingByRegion[region]?.items)
+            assertNull(h.vm.state.value.trendingByRegion[region]?.error)
+        }
+        // 失敗與成功區域皆被抓取
+        assertEquals(ChartRegion.DISPLAY_ORDER.toSet(), h.repo.receivedTrendingRegions.toSet())
+    }
+
+    @Test
+    fun `TrendingRetry 重試成功清除錯誤並寫入各區域榜單`() {
         val repo = FakeVideoRepository(
             trendingResult = Result.failure(RuntimeException("charts down"))
         )
         val h = buildHarness(repo)
         dispatcher.scheduler.advanceUntilIdle()
-        assertEquals("charts down", h.vm.state.value.trendingError)
-        assertEquals(1, h.repo.trendingCalls)
+        for (region in ChartRegion.DISPLAY_ORDER) {
+            assertEquals("charts down", h.vm.state.value.trendingByRegion[region]?.error)
+        }
+        assertEquals(ChartRegion.DISPLAY_ORDER.size, h.repo.trendingCalls)
 
         // 模擬後端恢復：換成成功結果後重試
         repo.trendingResult = Result.success(listOf(v1, v2))
         h.vm.onIntent(SearchIntent.TrendingRetry)
         dispatcher.scheduler.advanceUntilIdle()
 
-        assertEquals(listOf(v1, v2), h.vm.state.value.trendingItems)
-        assertNull(h.vm.state.value.trendingError)
-        assertTrue(!h.vm.state.value.trendingLoading)
-        assertEquals(2, h.repo.trendingCalls)
+        for (region in ChartRegion.DISPLAY_ORDER) {
+            assertEquals(listOf(v1, v2), h.vm.state.value.trendingByRegion[region]?.items)
+            assertNull(h.vm.state.value.trendingByRegion[region]?.error)
+        }
+        assertEquals(ChartRegion.DISPLAY_ORDER.size * 2, h.repo.trendingCalls)
     }
 
     @Test
@@ -318,13 +374,17 @@ class SearchViewModelTest {
         )
         val h = buildHarness(repo)
         dispatcher.scheduler.advanceUntilIdle()
-        assertEquals(listOf(v2, v3), h.vm.state.value.trendingItems)
+        for (region in ChartRegion.DISPLAY_ORDER) {
+            assertEquals(listOf(v2, v3), h.vm.state.value.trendingByRegion[region]?.items)
+        }
 
         h.doSearch("晴天")
         assertEquals(listOf(v1), h.vm.state.value.results)
         assertTrue(h.vm.state.value.searched)
-        assertEquals(listOf(v2, v3), h.vm.state.value.trendingItems)
-        assertNull(h.vm.state.value.trendingError)
+        for (region in ChartRegion.DISPLAY_ORDER) {
+            assertEquals(listOf(v2, v3), h.vm.state.value.trendingByRegion[region]?.items)
+            assertNull(h.vm.state.value.trendingByRegion[region]?.error)
+        }
 
         // 搜尋失敗也不影響已載入的 trending
         val repo2 = FakeVideoRepository(
@@ -335,7 +395,9 @@ class SearchViewModelTest {
         dispatcher.scheduler.advanceUntilIdle()
         h2.doSearch("晴天")
         assertEquals("boom", h2.vm.state.value.error)
-        assertEquals(listOf(v2, v3), h2.vm.state.value.trendingItems)
-        assertNull(h2.vm.state.value.trendingError)
+        for (region in ChartRegion.DISPLAY_ORDER) {
+            assertEquals(listOf(v2, v3), h2.vm.state.value.trendingByRegion[region]?.items)
+            assertNull(h2.vm.state.value.trendingByRegion[region]?.error)
+        }
     }
 }

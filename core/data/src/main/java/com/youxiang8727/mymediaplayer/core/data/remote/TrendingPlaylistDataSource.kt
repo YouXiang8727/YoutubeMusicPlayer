@@ -19,14 +19,16 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * 台灣熱門音樂榜單資料源（官方 YouTube Music playlist「台灣百大熱門音樂影片」）。
+ * 熱門音樂榜單資料源（支援多區域：台灣、西洋、日本、韓國）。
+ *
+ * 每個 [ChartRegion] 對應 YouTube Music Global Charts 官方頻道的一個 playlist
+ * （100 首、每週更新），[ChartRegion.playlistId] 提供對應的 playlist ID。
  *
  * 背景：舊 charts 資料鏈（`WEB_MUSIC_ANALYTICS` client ＋
  * `FEmusic_analytics_charts_home` browse）已於 2026-09 被 YouTube 汰除（恆 HTTP 400，
  * 且 charts.youtube.com 官方 `LAUNCHED_CHART_COUNTRIES` 不含 TW）。改走官方 YT Music
  * playlist，owner = YouTube Music Global Charts 官方頻道，100 首：
- * - playback list id：`PL4fGSI1pDJn4eKyK8APGwl0S0wgyHvQyU`
- * - browseId = `VL` + id
+ * - browseId = `VL` + [ChartRegion.playlistId]
  * - client = **ANDROID_VR**（免 poToken，與專案串流鏈同家族；版本易腐需一起監控）
  *
  * 依 A 實證規格，ANDROID_VR 的 UA / headers / `context.client` **直接在此 hardcode**
@@ -54,25 +56,21 @@ class TrendingPlaylistDataSource @Inject constructor(
 
     /**
      * 抓取指定區域的熱門音樂，**分頁聚合至整份**。
-     * @param region 目前僅 [ChartRegion.TAIWAN]（無其他官方來源區域）。
+     * @param region 榜單區域（[ChartRegion.DISPLAY_ORDER] 定義顯示順序）。
      */
     suspend fun fetch(region: ChartRegion): Result<List<VideoResult>> = withContext(dispatchers.io) {
-        runCatching {
-            when (region) {
-                ChartRegion.TAIWAN -> fetchTaiwanPlaylist()
-            }
-        }
+        runCatching { fetchPlaylist(region.playlistId) }
     }
 
-    /** 抓取台灣官方 playlist，分頁迴圈聚合至完整 100 首。 */
-    private suspend fun fetchTaiwanPlaylist(): List<VideoResult> {
+    /** 抓取指定 playlistId 的官方 playlist，分頁迴圈聚合至完整清單。 */
+    private suspend fun fetchPlaylist(playlistId: String): List<VideoResult> {
         val aggregated = mutableListOf<VideoResult>()
         val seenIds = mutableSetOf<String>()
         var token: String? = null
         var page = 1
 
         while (true) {
-            val body = if (token == null) buildFirstPageBody() else buildContinuationBody(token)
+            val body = if (token == null) buildFirstPageBody(playlistId) else buildContinuationBody(token)
             val rawJson = postJson(body)
 
             // 回應非合法 JSON → 直接 failure（前端可顯示錯誤，不與「空殼無內容」混淆）
@@ -126,10 +124,10 @@ class TrendingPlaylistDataSource @Inject constructor(
         return response.body ?: throw IOException("回應為空內容")
     }
 
-    /** 首頁 body：ANDROID_VR context ＋ `browseId="VL" + PLAYLIST_ID`。 */
-    private fun buildFirstPageBody(): String =
+    /** 首頁 body：ANDROID_VR context ＋ `browseId="VL" + playlistId`。 */
+    private fun buildFirstPageBody(playlistId: String): String =
         "{\"context\":{\"client\":$ANDROID_VR_CLIENT_CONTEXT}," +
-            "\"browseId\":\"VL$PLAYLIST_ID\"}"
+            "\"browseId\":\"VL$playlistId\"}"
 
     /** 續頁 body：同 context，但只有 continuation（**沒有** browseId）。 */
     private fun buildContinuationBody(token: String): String =
@@ -139,7 +137,6 @@ class TrendingPlaylistDataSource @Inject constructor(
     companion object {
         private const val TAG = "Trending"
         private const val BROWSE_ENDPOINT = "https://www.youtube.com/youtubei/v1/browse"
-        private const val PLAYLIST_ID = "PL4fGSI1pDJn4eKyK8APGwl0S0wgyHvQyU"
 
         /** ANDROID_VR client `context.client`（A 實證規格；免 poToken，與串流鏈同家族，
          * 版本易腐需一起監控）。依規格在此 hardcode，不共享 `InnerTubeClientProfiles`
