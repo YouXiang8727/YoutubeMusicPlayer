@@ -44,6 +44,7 @@
 - `core.domain.model.PlayQueueItem`：暫時性佇列項目（videoId + title 純 data class，零序列化標註；提供 `VideoResult.toPlayQueueItem()` 轉換）。傳遞採 controller 層平行 arrays（videoIds/titles）過 Intent，維持 domain 零序列化依賴
 - `core.domain.model.PlaybackSnapshot` / `RepeatMode`：播放狀態快照與循環模式枚舉
 - `core.domain.repository.VideoRepository` / `PlaylistRepository`：interface（`VideoRepository.search(query, continuationToken: String? = null): Result<VideoSearchPage>`）
+- `core.domain.repository.AudioStreamRepository`：音訊串流解析領域埠（interface）：`resolveAudioUrl(videoId: String, force: Boolean = false): Result<String>`。`force=true` 表示跳過 TTL 快取強制重解析（用於 content URL 403 過期後重試同曲）；快取細節封在 core:data，此介面只暴露語意
 - `core.domain.usecase.*`：SearchVideos（支援續頁 token 透傳）、FetchTrendingSongs（熱門音樂榜單，`region` 參數）、CreatePlaylist、RenamePlaylist、DeletePlaylist、ObservePlaylists、ObservePlaylistItems、AddToPlaylist、RemoveFromPlaylist、ClearPlaylist、ShufflePlayPlaylist
 - 測試：`src/test/` 純 JVM 單元測試（Fake Repository）
 
@@ -57,7 +58,8 @@
   - `NewPipeStreamSource`（主路徑）：NewPipe Extractor
   - `InnerTubeStreamSource`：直連 InnerTube player API（IOS → ANDROID_VR client，免 poToken；client 版本號為易腐常數，集中於共享 `stream.InnerTubeClientProfiles`）
   - `PipedStreamSource`：Piped 公開實例 `/streams/{id}`（最後手段）
-- `remote.stream.FallbackStreamResolver`：依序嘗試來源、成功結果 TTL 快取、經 `StreamErrorClassifier` 分類錯誤並聚合可讀訊息
+- `remote.stream.FallbackStreamResolver`：依序嘗試來源、成功結果 TTL 快取、經 `StreamErrorClassifier` 分類錯誤並聚合可讀訊息；`resolve(videoId, force=false)` 支援 `force=true` 繞過 TTL 快取強制重解析（成功覆寫快取；全失敗清除舊快取，避免死 URL 殘留被再命中）
+- `remote.stream.StreamErrorClassifier`：把例外訊息分類成 `StreamFailureKind`（BOT_BLOCK / TRANSIENT / PERMANENT）。raw HTTP 403（`HTTP 403`、`Response code: 403` 等，以 `\b403\b` 字元邊界匹配）歸 **TRANSIENT**（403 本質可重試／換網路，不屬永久結構性失敗；若同時含 bot 封鎖關鍵字則優先歸 BOT_BLOCK）；`describe(attempts)` 依分類聚合出不同使用者可讀提示（bot 封鎖／連結失效 403／網路不穩／一般錯誤）
 - `remote.stream.InnerTubeClientProfiles`：免 poToken 的 innerTube client 身分常數（IOS／ANDROID_VR 的 UA、`X-YouTube-Client-Name`、context JsonObject）集中管理，供串流解析鏈 `InnerTubeStreamSource` 使用（熱門榜單資料源依規格 hardcode own ANDROID_VR profile、不共用本常數；易腐版本常數需互相對照更新）
 - `remote.NetworkModule`：HTTP client 依用途拆雙 profile（Hilt qualifier 定義於 `di.HttpProfileQualifiers`）：
   - `@BrowserProfile`：掛瀏覽器 UA／Referer／Cookie 攔截器（`YoutubeHeaderInterceptor`），僅供 Retrofit `YoutubeSearchApi` 抓行動版搜尋頁 HTML
@@ -79,6 +81,7 @@
   - 播放佇列：點播曲目在播放清單中 → 整份清單從該曲起播；否則單曲（`playback.PlaybackQueueBuilder` 純函數，有單元測試）
   - 暫時性佇列（熱門榜單）：經 `PlayerController.playQueue` → `ACTION_PLAY_QUEUE`（平行陣列 videoIds/titles 過 Intent）直接起播，**不查 Room**；`PlaybackQueueBuilder.buildFromEntries` 純函數（startIndex clamp、空清單回 size 0），有單元測試
   - 串流 URL 以 `ResolvingDataSource` 於載入當下逐首解析（NewPipe）
+  - **content URL 403 自動恢復**：`onPlayerError` 攔截 Media3 `Player.Listener`，辨識 cause chain 中的 `HttpDataSource.InvalidResponseCodeException`（responseCode == 403）。策略分層：① 失效該 videoId session 級 memoize + `resolveAudioUrl(videoId, force=true)` 強制重解析同曲，成功則回到原 position 重試同一首；② 重新解析仍失敗 → 依 `repeatMode` 切歌（`REPEAT_MODE_ONE` 重播同一首；`REPEAT_MODE_ALL/OFF` 走 `seekToNextMediaItem()`，無下一首則回繞或自然停）。非 403 錯誤不攔截，維持既有 snapshot/error 顯示。併發防護：`pending403Handling` 防同 videoId 重入，`retryCounts` 上限 `MAX_403_RETRY_PER_VIDEO=3` 防無限重試（READY 成功播放時重設該曲計數）
   - 通知由自訂 `service.CustomMediaNotificationProvider`（`DefaultMediaNotificationProvider` 子類別）產生：覆寫 `getMediaButtons` 回傳**固定按鈕序列** [上一首, 播放/暫停, 下一首, 隨機, 循環]，不呼叫父類別那組會補系統 prev/next 的邏輯——上一首／下一首為常駐按鈕（`SLOT_BACK` / `SLOT_FORWARD`，custom session command，不受 `hasPreviousMediaItem()` / `hasNextMediaItem()` 過濾影響，清單邊界或單曲時仍固定顯示；無上/下一首時落點為重播目前曲目開頭）；播放/暫停不設 slots（走 Media3 預設 `SLOT_CENTRAL`，play/pause icon 依播放狀態切換）；隨機與循環走 `SLOT_OVERFLOW`（展開區，`CommandButton.ICON_*` 依播放模式切換：`ICON_SHUFFLE_ON/OFF`、`ICON_REPEAT_ALL/ONE`，`ICON_SHUFFLE_OFF` 為官方 disabled 色）。compact view 依 slots 判定固定為 [上一首, 播放/暫停, 下一首]，**不會重複**系統 prev/next；通知本體點擊經 `MediaSession.setSessionActivity`（contentIntent）將 App 帶回前景。
     - **重複 icon 雙層解**：方案 A（`CustomMediaNotificationProvider` 覆寫 `getMediaButtons`）處理「notification 自訂 actions」層；A2（`MusicService.sessionCallback.onPostConnect` 呼叫**廣播級** `mediaSession.setMediaButtonPreferences(buildCustomLayout(session))`，與 `setCustomLayout` 共用同一份含 SLOT_BACK/FORWARD 的按鈕清單）處理「SystemUI MediaStyle media surface」層——Media3 `MediaSessionLegacyStub`（line 1923-1930）在 media button preferences 非空且 custom layout 含 SLOT_BACK/FORWARD 時，會從 `PlaybackState.actions` 移除 `ACTION_SKIP_TO_PREVIOUS/NEXT`，使 SystemUI 不再渲染系統 prev/seekbar/next（是否生效需實機 `dumpsys media_session` 驗證）
   - Service 的 Manifest 宣告在 feature 模組內（manifest merging 併入 app）；POST_NOTIFICATIONS 由 app 於啟動時動態請求
@@ -130,6 +133,7 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"; .\gradlew.bat as
 | YouTube 改版使 ytInitialData / NewPipe 失效；匿名 IP 遭 bot 偵測封鎖（LOGIN_REQUIRED「Sign in to confirm you're not a bot」） | 搜尋、播放全掛 | StreamResolver 改多層 fallback：NewPipe → InnerTube 直連（IOS／ANDROID_VR client，免 poToken）→ Piped 實例，成功結果 TTL 快取；錯誤分類聚合顯示於通知。extractor 升級由 A 走統一 PR；poToken/BotGuard WebView 方案成本高暫緩（見 TEAM.md §7） | B |
 | Foreground Service 政策（API 34+） | 上架審查 / 背景 被殺 | 已宣告 `foregroundServiceType=mediaPlayback`；未來接 MediaSessionService | B |
 | 串流 URL 有時效性 | 暫停過久後恢復失敗 | 失敗時重新 resolve（MusicService 已有 job cancel/re-run 機制） | B |
+| content URL（googlevideo.com）播放當下 403 | 死 URL 卡在 session 內不自動重解析、不切歌，顯示 Source error | 403 由 `StreamErrorClassifier` 歸 TRANSIENT；MusicService `onPlayerError` 偵測 `InvalidResponseCodeException(403)` → 失效 memoize＋`resolveAudioUrl(force=true)` 重解析同曲；仍失敗則依 repeatMode 切歌。bounded retry（`MAX_403_RETRY_PER_VIDEO=3`）+ `pending403Handling` 防無限重試。NewPipe/InnerTube 解析改動需實機煙霧測試驗證 | B |
 | WebView 播放器與音訊服務同時發聲 | 使用者困惑 | Roadmap：以 ExoPlayer 畫面取代 WebView | C+B |
 | 通知權限（Android 13+）未授予 | 背景播放時通知不出現（音訊不受影響） | App 啟動時動態請求 POST_NOTIFICATIONS；拒絕僅影響通知與鎖屏控制 | C |
 | 逐首解析串流 URL 的切歌延遲 | 下一首開始前有解析等待（NewPipe 網路往返） | ResolvingDataSource 快取已解析結果；buffering 狀態由系統 UI 呈現；必要時改預先解析下一首 | B |
