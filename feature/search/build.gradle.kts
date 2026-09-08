@@ -36,6 +36,8 @@ dependencies {
     implementation(project(":core:domain"))
     implementation(project(":feature:playlist"))
 
+    implementation(libs.androidx.activity.compose)
+
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)
     implementation(libs.androidx.hilt.navigation.compose)

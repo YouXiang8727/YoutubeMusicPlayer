@@ -1,5 +1,6 @@
 package com.youxiang8727.mymediaplayer.feature.search
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +22,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -57,6 +59,7 @@ import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlayQueueItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.toPlayQueueItem
+import com.youxiang8727.mymediaplayer.core.ui.component.DurationBadge
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
 import com.youxiang8727.mymediaplayer.feature.playlist.CreatePlaylistDialog
 import com.youxiang8727.mymediaplayer.feature.playlist.PlaylistPickerSheet
@@ -81,6 +84,12 @@ fun SearchScreen(
     // 展開完整榜單的區域（null = 全部收合成 rail 並排）（同 feature:search 內以 state 切換，不新增 nav route）
     var fullChartRegion by remember { mutableStateOf<ChartRegion?>(null) }
 
+    // 已搜尋時攔截系統返回鍵為「清除搜尋」回到推薦頁；未搜尋（searched == false）時
+    // enabled = false 保持系統預設行為（退出 App）。
+    BackHandler(enabled = state.searched) {
+        onIntent(SearchIntent.QueryChanged(""))
+    }
+
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         Column(
             modifier = Modifier
@@ -93,6 +102,16 @@ fun SearchScreen(
                 onValueChange = { onIntent(SearchIntent.QueryChanged(it)) },
                 label = { Text("搜尋影片") },
                 singleLine = true,
+                trailingIcon = {
+                    if (state.query.isNotBlank()) {
+                        IconButton(onClick = { onIntent(SearchIntent.QueryChanged("")) }) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "清除搜尋"
+                            )
+                        }
+                    }
+                },
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(8.dp))
@@ -124,7 +143,8 @@ fun SearchScreen(
                             onShowFullChart = {},
                             onBackToRail = { fullChartRegion = null },
                             onRetry = { onIntent(SearchIntent.TrendingRetry) },
-                            onPlayChartQueue = onPlayChartQueue
+                            onPlayChartQueue = onPlayChartQueue,
+                            onAdd = { showPickerVideo = it }
                         )
                     } else {
                         // 四區域 rail 並排：垂直 LazyColumn 承載，避免 4 條 rail 超出螢幕高度
@@ -140,7 +160,8 @@ fun SearchScreen(
                                     onShowFullChart = { fullChartRegion = region },
                                     onBackToRail = {},
                                     onRetry = { onIntent(SearchIntent.TrendingRetry) },
-                                    onPlayChartQueue = onPlayChartQueue
+                                    onPlayChartQueue = onPlayChartQueue,
+                                    onAdd = { showPickerVideo = it }
                                 )
                             }
                             item { Spacer(Modifier.height(24.dp)) }
@@ -248,7 +269,8 @@ private fun TrendingSection(
     onShowFullChart: () -> Unit,
     onBackToRail: () -> Unit,
     onRetry: () -> Unit,
-    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit
+    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
+    onAdd: (VideoResult) -> Unit
 ) {
     when {
         trending.loading -> Box(
@@ -303,12 +325,14 @@ private fun TrendingSection(
 
                 showFullChart -> ChartFullList(
                     items = trending.items,
-                    onPlayChartQueue = onPlayChartQueue
+                    onPlayChartQueue = onPlayChartQueue,
+                    onAdd = onAdd
                 )
 
                 else -> ChartRail(
                     items = trending.items,
-                    onPlayChartQueue = onPlayChartQueue
+                    onPlayChartQueue = onPlayChartQueue,
+                    onAdd = onAdd
                 )
             }
         }
@@ -350,7 +374,8 @@ private fun TrendingError(message: String?, onRetry: () -> Unit) {
 @Composable
 private fun ChartRail(
     items: List<VideoResult>,
-    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit
+    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
+    onAdd: (VideoResult) -> Unit
 ) {
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -364,7 +389,8 @@ private fun ChartRail(
                 onClick = {
                     // 以「整份榜單」為佇列從該曲起播（rail 只顯示前 N 筆，佇列仍是完整清單）
                     onPlayChartQueue(items.map { it.toPlayQueueItem() }, index)
-                }
+                },
+                onAdd = { onAdd(video) }
             )
         }
     }
@@ -374,7 +400,8 @@ private fun ChartRail(
 @Composable
 private fun ChartFullList(
     items: List<VideoResult>,
-    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit
+    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
+    onAdd: (VideoResult) -> Unit
 ) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -384,7 +411,8 @@ private fun ChartFullList(
             ChartDetailRow(
                 rank = index + 1,
                 video = video,
-                onClick = { onPlayChartQueue(items.map { it.toPlayQueueItem() }, index) }
+                onClick = { onPlayChartQueue(items.map { it.toPlayQueueItem() }, index) },
+                onAdd = { onAdd(video) }
             )
         }
         item { Spacer(Modifier.height(24.dp)) }
@@ -395,7 +423,8 @@ private fun ChartFullList(
 private fun ChartRailItem(
     rank: Int,
     video: VideoResult,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onAdd: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -425,6 +454,32 @@ private fun ChartRailItem(
                     color = MaterialTheme.colorScheme.primary
                 )
             }
+            // 右下角：時長 badge 與「加入播放清單」＋並排（Row 避免兩者重疊）
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DurationBadge(duration = video.duration)
+                // 獨立可點擊區域（在整卡 onClick 之前攔截），疊於縮圖右下角。
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+                        .clickable(onClick = onAdd),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = "加入播放清單",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
         }
         Spacer(Modifier.height(4.dp))
         Text(
@@ -449,7 +504,8 @@ private fun ChartRailItem(
 private fun ChartDetailRow(
     rank: Int,
     video: VideoResult,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onAdd: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -466,10 +522,19 @@ private fun ChartDetailRow(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.width(32.dp)
             )
-            ChartThumbnail(
-                url = video.thumbnailUrl,
-                modifier = Modifier.size(96.dp, 54.dp)
-            )
+            // 縮圖＋時長 badge（右下角）
+            Box {
+                ChartThumbnail(
+                    url = video.thumbnailUrl,
+                    modifier = Modifier.size(96.dp, 54.dp)
+                )
+                DurationBadge(
+                    duration = video.duration,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(4.dp)
+                )
+            }
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -487,6 +552,9 @@ private fun ChartDetailRow(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+            }
+            IconButton(onClick = onAdd) {
+                Icon(Icons.Filled.Add, contentDescription = "加入播放清單")
             }
         }
     }
@@ -528,21 +596,30 @@ private fun VideoCard(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (video.thumbnailUrl.isNotBlank()) {
-                AsyncImage(
-                    model = video.thumbnailUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
+            // 縮圖＋時長 badge（右下角）
+            Box {
+                if (video.thumbnailUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = video.thumbnailUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(96.dp, 54.dp)
+                            .clip(MaterialTheme.shapes.small)
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(96.dp, 54.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .background(Color.LightGray)
+                    )
+                }
+                DurationBadge(
+                    duration = video.duration,
                     modifier = Modifier
-                        .size(96.dp, 54.dp)
-                        .clip(MaterialTheme.shapes.small)
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(96.dp, 54.dp)
-                        .clip(MaterialTheme.shapes.small)
-                        .background(Color.LightGray)
+                        .align(Alignment.BottomEnd)
+                        .padding(4.dp)
                 )
             }
             Spacer(Modifier.size(12.dp))
@@ -690,8 +767,8 @@ private fun SearchScreenResultsPreview() {
             state = SearchUiState(
                 query = "周杰倫",
                 results = listOf(
-                    VideoResult("dQw4w9WgXcQ", "晴天", "", "Jay Chou"),
-                    VideoResult("abc12345678", "夜曲 Live", "", "Official")
+                    VideoResult("dQw4w9WgXcQ", "晴天", "", "Jay Chou", "4:30"),
+                    VideoResult("abc12345678", "夜曲 Live", "", "Official", "3:12")
                 ),
                 searched = true
             ),
@@ -732,8 +809,8 @@ private fun SearchScreenResultsLoadMorePreview() {
             state = SearchUiState(
                 query = "周杰倫",
                 results = listOf(
-                    VideoResult("dQw4w9WgXcQ", "晴天", "", "Jay Chou"),
-                    VideoResult("abc12345678", "夜曲 Live", "", "Official")
+                    VideoResult("dQw4w9WgXcQ", "晴天", "", "Jay Chou", "4:30"),
+                    VideoResult("abc12345678", "夜曲 Live", "", "Official", "3:12")
                 ),
                 nextPageToken = "continuation-token-1",
                 searched = true
@@ -774,8 +851,8 @@ private fun SearchScreenResultsLoadingMorePreview() {
             state = SearchUiState(
                 query = "周杰倫",
                 results = listOf(
-                    VideoResult("dQw4w9WgXcQ", "晴天", "", "Jay Chou"),
-                    VideoResult("abc12345678", "夜曲 Live", "", "Official")
+                    VideoResult("dQw4w9WgXcQ", "晴天", "", "Jay Chou", "4:30"),
+                    VideoResult("abc12345678", "夜曲 Live", "", "Official", "3:12")
                 ),
                 nextPageToken = "continuation-token-1",
                 isLoadingMore = true,
@@ -799,7 +876,8 @@ private fun trendingPreviewItems(region: ChartRegion, count: Int): List<VideoRes
             "trending-${region.name}-$i",
             "${region.displayTitle()} Top ${i + 1}",
             "",
-            "歌手 $i"
+            "歌手 $i",
+            "3:4${i % 10}"
         )
     }
 
@@ -911,7 +989,8 @@ private fun SearchScreenTrendingFullChartPreview() {
             onShowFullChart = {},
             onBackToRail = {},
             onRetry = {},
-            onPlayChartQueue = { _, _ -> }
+            onPlayChartQueue = { _, _ -> },
+            onAdd = {}
         )
     }
 }
