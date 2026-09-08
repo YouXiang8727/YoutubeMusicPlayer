@@ -71,7 +71,8 @@ class YoutubeDataSourceTest {
                               "videoId": "id1",
                               "title": { "simpleText": "影片 A" },
                               "ownerText": { "simpleText": "頻道 A" },
-                              "thumbnail": { "thumbnails": [{ "url": "https://img/1" }] }
+                              "thumbnail": { "thumbnails": [{ "url": "https://img/1" }] },
+                              "lengthText": { "simpleText": "3:45" }
                             }
                           }
                         ]
@@ -110,7 +111,8 @@ class YoutubeDataSourceTest {
                             "navigationEndpoint": { "watchEndpoint": { "videoId": "id2" } },
                             "headline": { "runs": [{ "text": "影片 B" }] },
                             "shortBylineText": { "runs": [{ "text": "頻道 B" }] },
-                            "thumbnail": { "thumbnails": [{ "url": "https://img/2" }] }
+                            "thumbnail": { "thumbnails": [{ "url": "https://img/2" }] },
+                            "thumbnailOverlayTimeStatusRenderer": { "text": { "simpleText": "2:22" } }
                           }
                         }
                       ]
@@ -165,6 +167,7 @@ class YoutubeDataSourceTest {
         val page = dataSource.search("晴天")
 
         assertEquals(listOf("id1"), page.results.map { it.videoId })
+        assertEquals("3:45", page.results[0].duration)
         assertEquals("TOKEN_PAGE_1", page.nextPageToken)
         assertEquals(FakeYoutubeSearchApi.GetCall("晴天", null), api.getCalls.single())
         assertTrue(api.postCalls.isEmpty())
@@ -181,6 +184,7 @@ class YoutubeDataSourceTest {
         val page2 = dataSource.search("晴天", continuationToken = "TOKEN_PAGE_1")
 
         assertEquals(listOf("id2"), page2.results.map { it.videoId })
+        assertEquals("2:22", page2.results[0].duration)
         assertEquals("TOKEN_PAGE_2==", page2.nextPageToken)
         // 續頁不應走 GET 續頁
         assertTrue(api.getCalls.none { it.continuationToken != null })

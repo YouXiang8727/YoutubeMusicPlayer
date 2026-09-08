@@ -39,7 +39,8 @@ class YoutubeSearchParserTest {
                               "videoId": "id1",
                               "title": { "runs": [{ "text": "影片 A" }] },
                               "ownerText": { "runs": [{ "text": "頻道 A" }] },
-                              "thumbnail": { "thumbnails": [{ "url": "https://img/1" }] }
+                              "thumbnail": { "thumbnails": [{ "url": "https://img/1" }] },
+                              "lengthText": { "simpleText": "3:45" }
                             }
                           },
                           {
@@ -200,7 +201,8 @@ class YoutubeSearchParserTest {
                             "navigationEndpoint": { "watchEndpoint": { "videoId": "id3" } },
                             "headline": { "runs": [{ "text": "續頁影片 C" }] },
                             "shortBylineText": { "runs": [{ "text": "續頁頻道 C" }] },
-                            "thumbnail": { "thumbnails": [{ "url": "https://img/3" }] }
+                            "thumbnail": { "thumbnails": [{ "url": "https://img/3" }] },
+                            "thumbnailOverlayTimeStatusRenderer": { "text": { "simpleText": "5:30" } }
                           }
                         },
                         {
@@ -291,6 +293,9 @@ class YoutubeSearchParserTest {
         assertEquals("頻道 A", page.results[0].channel)
         assertEquals("影片 B", page.results[1].title)
         assertEquals("頻道 B", page.results[1].channel)
+        // duration：lengthText.simpleText 解析、缺 lengthText 為 null
+        assertEquals("3:45", page.results[0].duration)
+        assertEquals(null, page.results[1].duration)
         // 續頁 token 只認 continuationItemRenderer 路徑，filter chip 的 token 不會誤取
         assertEquals("TOKEN_PAGE_1", page.nextPageToken)
     }
@@ -330,6 +335,9 @@ class YoutubeSearchParserTest {
         assertEquals("續頁影片 C", page.results[0].title)
         assertEquals("續頁頻道 C", page.results[0].channel)
         assertEquals("續頁影片 D", page.results[1].title)
+        // duration：thumbnailOverlayTimeStatusRenderer.text 優先；缺時為 null
+        assertEquals("5:30", page.results[0].duration)
+        assertEquals(null, page.results[1].duration)
         assertEquals("TOKEN_PAGE_2==", page.nextPageToken)
     }
 

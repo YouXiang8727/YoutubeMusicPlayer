@@ -76,11 +76,17 @@ class PlaylistRepositoryImplTest {
         }
     }
 
-    private fun item(videoId: String, playlistId: Long = 1L, addedAt: Long = 0L) = PlaylistItem(
+    private fun item(
+        videoId: String,
+        playlistId: Long = 1L,
+        addedAt: Long = 0L,
+        duration: String? = null
+    ) = PlaylistItem(
         videoId = videoId,
         title = "Title $videoId",
         thumbnailUrl = "https://img/$videoId",
         channel = "Channel $videoId",
+        duration = duration,
         addedAt = addedAt,
         playlistId = playlistId
     )
@@ -172,6 +178,20 @@ class PlaylistRepositoryImplTest {
         repository.clearPlaylist(id)
 
         assertTrue(repository.observePlaylistItems(id).first().isEmpty())
+    }
+
+    @Test
+    fun `addItem 帶 duration 時 Entity 與 Domain mapping 皆保留`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val id = repository.createPlaylist("清單")
+        repository.addItem(id, item("v1", playlistId = id, duration = "3:45"))
+
+        val items = repository.observePlaylistItems(id).first()
+        assertEquals("3:45", items.single().duration)
+        // toEntity mapping 一併保留（Room 持久化面）
+        assertEquals("3:45", dao.itemTable.value.single().duration)
     }
 
     @Test

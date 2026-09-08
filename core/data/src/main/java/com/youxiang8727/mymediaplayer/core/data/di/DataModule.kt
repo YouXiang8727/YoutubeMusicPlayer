@@ -2,6 +2,8 @@ package com.youxiang8727.mymediaplayer.core.data.di
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.youxiang8727.mymediaplayer.core.common.DefaultDispatcherProvider
 import com.youxiang8727.mymediaplayer.core.common.DispatcherProvider
 import com.youxiang8727.mymediaplayer.core.data.di.StreamProfile
@@ -35,6 +37,13 @@ import okhttp3.OkHttpClient
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
 
+    /** v2 → v3：playlist_items 新增可空 duration 欄位（顯示用長度字串）。 */
+    private val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE playlist_items ADD COLUMN duration TEXT")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
@@ -42,7 +51,8 @@ object DatabaseModule {
             context.applicationContext,
             AppDatabase::class.java,
             "mymediaplayer.db"
-        ).fallbackToDestructiveMigration()
+        ).addMigrations(MIGRATION_2_3)
+            .fallbackToDestructiveMigration()  // 對不可預期版本仍是防禦
             .build()
     }
 

@@ -302,7 +302,11 @@ private fun JsonObject.toVideoResult(): VideoResult? {
         videoId = videoId,
         title = title.ifBlank { videoId },
         thumbnailUrl = thumb,
-        channel = channel
+        channel = channel,
+        duration = lengthText()
+            ?: normalizeDuration(
+                primitiveText(path("thumbnailOverlayTimeStatusRenderer", "text", "simpleText"))
+            )
     )
 }
 
@@ -321,8 +325,27 @@ private fun JsonObject.toContinuationVideoResult(): VideoResult? {
         videoId = videoId,
         title = title.ifBlank { videoId },
         thumbnailUrl = thumb,
-        channel = channel
+        channel = channel,
+        duration = normalizeDuration(
+            primitiveText(path("thumbnailOverlayTimeStatusRenderer", "text", "simpleText"))
+        ) ?: lengthText()
     )
+}
+
+/**
+ * 統一取得 `lengthText` 的顯示字串（videoRenderer / videoWithContextRenderer 共用）。
+ * 取法：`lengthText.simpleText` 或 `lengthText.runs[].text`；直播影片（無 lengthText）回 null。
+ */
+private fun JsonObject.lengthText(): String? =
+    normalizeDuration(primitiveText(path("lengthText", "simpleText")))
+        ?: normalizeDuration(path("lengthText", "runs")?.jsonArrayFirstText())
+
+/** 顯示用長度字串正規化：trim 之外處理 \u202F（narrow no-break space）與 \u00A0（no-break space），
+ * 正規化後為空白一律回傳 null。 */
+private fun normalizeDuration(raw: String?): String? {
+    if (raw == null) return null
+    val normalized = raw.trim().replace('\u202F', ' ').replace('\u00A0', ' ').trim()
+    return normalized.ifBlank { null }
 }
 
 private fun JsonObject.str(key: String): String? =
