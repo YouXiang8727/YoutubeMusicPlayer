@@ -46,6 +46,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
+import com.youxiang8727.mymediaplayer.core.ui.component.DurationBadge
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
 
 /** 播放清單詳情頁（無狀態） */
@@ -153,24 +154,33 @@ private fun PlaylistDetailCard(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (item.thumbnailUrl.isNotBlank()) {
-                AsyncImage(
-                    model = item.thumbnailUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
+            // 縮圖＋時長 badge（右下角）。包一層 Box 統一處理縮圖與 badge，避免兩分支重複。
+            Box {
+                if (item.thumbnailUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = item.thumbnailUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(96.dp, 54.dp)
+                            .clip(MaterialTheme.shapes.small),
+                        // 使用 placeholder 提升預覽與載入時的體驗
+                        placeholder = ColorPainter(MaterialTheme.colorScheme.surfaceVariant),
+                        error = ColorPainter(MaterialTheme.colorScheme.surfaceVariant)
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(96.dp, 54.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    )
+                }
+                DurationBadge(
+                    duration = item.duration,
                     modifier = Modifier
-                        .size(96.dp, 54.dp)
-                        .clip(MaterialTheme.shapes.small),
-                    // 使用 placeholder 提升預覽與載入時的體驗
-                    placeholder = ColorPainter(MaterialTheme.colorScheme.surfaceVariant),
-                    error = ColorPainter(MaterialTheme.colorScheme.surfaceVariant)
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(96.dp, 54.dp)
-                        .clip(MaterialTheme.shapes.small)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .align(Alignment.BottomEnd)
+                        .padding(4.dp)
                 )
             }
             Spacer(Modifier.size(12.dp))
@@ -287,6 +297,7 @@ private fun PlaylistDetailScreenItemsPreview() {
                         title = "晴天",
                         thumbnailUrl = "",
                         channel = "Jay Chou",
+                        duration = "4:30",
                         playlistId = 1
                     ),
                     PlaylistItem(
@@ -294,6 +305,7 @@ private fun PlaylistDetailScreenItemsPreview() {
                         title = "夜曲 Live",
                         thumbnailUrl = "",
                         channel = "Official",
+                        duration = null,
                         playlistId = 1
                     )
                 )

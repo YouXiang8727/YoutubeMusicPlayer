@@ -80,7 +80,23 @@ class SearchViewModel @Inject constructor(
 
     fun onIntent(intent: SearchIntent) {
         when (intent) {
-            is SearchIntent.QueryChanged -> _state.update { it.copy(query = intent.value) }
+            is SearchIntent.QueryChanged -> {
+                _state.update { it.copy(query = intent.value) }
+                // 空白查詢：重置搜尋狀態回推薦頁（熱門榜單），提供「清除搜尋 / 返回」路徑。
+                // 不觸碰 trendingByRegion（既有快取，返回時直接顯示）。
+                if (intent.value.isBlank()) {
+                    _state.update {
+                        it.copy(
+                            searched = false,
+                            results = emptyList(),
+                            nextPageToken = null,
+                            isLoading = false,
+                            isLoadingMore = false,
+                            error = null
+                        )
+                    }
+                }
+            }
             SearchIntent.Search -> doSearch()
             SearchIntent.LoadMore -> loadMore()
             is SearchIntent.AddToPlaylist -> addVideoToPlaylist(

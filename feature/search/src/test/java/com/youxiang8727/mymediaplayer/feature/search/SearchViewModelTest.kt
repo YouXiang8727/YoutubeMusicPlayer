@@ -229,6 +229,37 @@ class SearchViewModelTest {
     }
 
     @Test
+    fun `空白 query 重置搜尋狀態回推薦頁且保留熱門榜單快取`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A")),
+            trendingResult = Result.success(listOf(v1, v2))
+        )
+        val h = buildHarness(repo)
+        dispatcher.scheduler.advanceUntilIdle() // 載入熱門榜單快取
+
+        // 先執行搜尋，進入已搜尋狀態
+        h.doSearch("晴天")
+        assertTrue(h.vm.state.value.searched)
+        assertEquals(listOf(v1), h.vm.state.value.results)
+
+        // 收到空白 QueryChanged → 重置回推薦頁（清除搜尋）
+        h.vm.onIntent(SearchIntent.QueryChanged(""))
+        val st = h.vm.state.value
+        assertTrue(!st.searched)
+        assertEquals(emptyList<VideoResult>(), st.results)
+        assertNull(st.nextPageToken)
+        assertTrue(!st.isLoading)
+        assertTrue(!st.isLoadingMore)
+        assertNull(st.error)
+
+        // 熱門榜單快取保留，返回時直接顯示
+        for (region in ChartRegion.DISPLAY_ORDER) {
+            assertEquals(listOf(v1, v2), st.trendingByRegion[region]?.items)
+            assertNull(st.trendingByRegion[region]?.error)
+        }
+    }
+
+    @Test
     fun `深頁重疊時 append 去重且順序不變不崩潰`() {
         // 第一頁尾 2 筆（v1、v2）在第二頁重複出現，模擬 deep page 5~28% 重疊
         val repo = FakeVideoRepository(

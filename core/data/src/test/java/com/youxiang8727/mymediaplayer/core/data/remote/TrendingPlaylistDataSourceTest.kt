@@ -44,17 +44,35 @@ class TrendingPlaylistDataSourceTest {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    private fun videoRenderer(id: String, title: String, channel: String): String = """
-        {
-          "videoId": "$id",
-          "title": { "runs": [ { "text": "$title" } ] },
-          "shortBylineText": { "runs": [ { "text": "$channel" } ] },
-          "thumbnail": { "thumbnails": [ { "url": "https://thumb/$id" }, { "url": "https://thumb2/$id" } ] }
-        }
-    """.trimIndent()
+    private fun videoRenderer(
+        id: String,
+        title: String,
+        channel: String,
+        lengthText: String? = null,
+        timeStatusText: String? = null
+    ): String {
+        val lengthField = listOfNotNull(
+            lengthText?.let { """"lengthText": { "simpleText": "$it" }""" },
+            timeStatusText?.let { """"thumbnailOverlayTimeStatusRenderer": { "text": { "simpleText": "$it" } }""" }
+        ).joinToString(",")
+        val fields = if (lengthField.isEmpty()) "" else ", $lengthField"
+        return """
+            {
+              "videoId": "$id",
+              "title": { "runs": [ { "text": "$title" } ] },
+              "shortBylineText": { "runs": [ { "text": "$channel" } ] },
+              "thumbnail": { "thumbnails": [ { "url": "https://thumb/$id" }, { "url": "https://thumb2/$id" } ] }$fields
+            }
+        """.trimIndent()
+    }
 
     /** 首頁 fixture：2 首 + playlistVideoListRenderer.continuations[0].nextContinuationData.continuation */
-    private fun page1Json(token: String = "TOKEN%3DABC") = """
+    private fun page1Json(
+        token: String = "TOKEN%3DABC",
+        firstLength: String? = null,
+        secondLength: String? = null,
+        secondTimeStatus: String? = null
+    ) = """
         {
           "contents": {
             "twoColumnBrowseResultsRenderer": {
@@ -66,8 +84,8 @@ class TrendingPlaylistDataSourceTest {
                         {
                           "musicPlaylistShelfRenderer": {
                             "contents": [
-                              { "playlistVideoRenderer": ${videoRenderer("vid1", "晴天", "周杰倫")} },
-                              { "playlistVideoRenderer": ${videoRenderer("vid2", "七里香", "五月天")} }
+                              { "playlistVideoRenderer": ${videoRenderer("vid1", "晴天", "周杰倫", firstLength)} },
+                              { "playlistVideoRenderer": ${videoRenderer("vid2", "七里香", "五月天", secondLength, secondTimeStatus)} }
                             ]
                           }
                         },
@@ -128,13 +146,40 @@ class TrendingPlaylistDataSourceTest {
 
     @Test
     fun `parsePlaylistPage 解析首頁：2 首 + 續頁 token`() {
-        val page = parsePlaylistPage(json, page1Json("TOKEN%3DABC"))
+        val page = parsePlaylistPage(
+            json,
+            page1Json(
+                token = "TOKEN%3DABC",
+                firstLength = "3:45"
+            )
+        )
 
         assertEquals(listOf("vid1", "vid2"), page.items.map { it.videoId })
         assertEquals("晴天", page.items[0].title)
         assertEquals("周杰倫", page.items[0].channel)
         assertEquals("https://thumb/vid1", page.items[0].thumbnailUrl)
+        // duration：帶 lengthText 的解析出來、未帶的為 null
+        assertEquals("3:45", page.items[0].duration)
+        assertEquals(null, page.items[1].duration)
         assertEquals("TOKEN%3DABC", page.nextToken)
+    }
+
+    @Test
+    fun `parsePlaylistPage duration 正規化：含窄不換行空格與空白值回 null`() {
+        // \u202F（narrow no-break space）與 \u00A0 在 NewPipe/YT 回應中常混入
+        val page = parsePlaylistPage(
+            json,
+            page1Json(
+                token = "TOKEN%3DABC",
+                firstLength = "\u202F1:02:03\u202F",
+                secondLength = "\u00A0 \u202F ",
+                secondTimeStatus = "5:30"
+            )
+        )
+
+        // lengthText 有 \u202F → 正規化後保留內容；空白值 → null 走 thumbnailOverlay fallback
+        assertEquals("1:02:03", page.items[0].duration)
+        assertEquals("5:30", page.items[1].duration)
     }
 
     @Test

@@ -245,7 +245,8 @@ internal fun extractPlaylistContinuationToken(root: JsonElement): String? {
  * - `videoId`（直接字串）
  * - `title.runs[0].text`（歌名）
  * - `shortBylineText.runs[0].text`（歌手）
- * - `thumbnail.thumbnails[].url`（取第一個非空） */
+ * - `thumbnail.thumbnails[].url`（取第一個非空）
+ * - duration：`lengthText.simpleText`/`runs`，fallback `thumbnailOverlayTimeStatusRenderer.text.simpleText` */
 private fun JsonObject.toPlaylistVideoResult(): VideoResult? {
     val videoId = str("videoId") ?: return null
     val title = path("title", "runs")?.runsFirstText() ?: ""
@@ -256,7 +257,11 @@ private fun JsonObject.toPlaylistVideoResult(): VideoResult? {
         videoId = videoId,
         title = title.ifBlank { videoId },
         thumbnailUrl = thumb,
-        channel = channel
+        channel = channel,
+        duration = lengthText()
+            ?: normalizeDuration(
+                primitiveText(path("thumbnailOverlayTimeStatusRenderer", "text", "simpleText"))
+            )
     )
 }
 
@@ -269,6 +274,22 @@ private fun JsonObject.path(vararg keys: String): JsonElement? {
         cur = (cur as? JsonObject)?.get(k) ?: return null
     }
     return cur
+}
+
+private fun primitiveText(element: JsonElement?): String? =
+    (element as? JsonPrimitive)?.content
+
+/** 統一取得 `lengthText` 的顯示字串：`lengthText.simpleText` 或 `lengthText.runs[].text`。 */
+private fun JsonObject.lengthText(): String? =
+    normalizeDuration(primitiveText(path("lengthText", "simpleText")))
+        ?: normalizeDuration(path("lengthText", "runs")?.runsFirstText())
+
+/** 顯示用長度字串正規化：trim 之外處理 \u202F（narrow no-break space）與 \u00A0（no-break space），
+ * 正規化後為空白一律回傳 null。 */
+private fun normalizeDuration(raw: String?): String? {
+    if (raw == null) return null
+    val normalized = raw.trim().replace('\u202F', ' ').replace('\u00A0', ' ').trim()
+    return normalized.ifBlank { null }
 }
 
 /** `runs[0].text`（innerTube 慣用結構）。 */
