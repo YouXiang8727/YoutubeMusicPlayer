@@ -384,7 +384,6 @@ private fun ChartRail(
     ) {
         itemsIndexed(items.take(TRENDING_RAIL_LIMIT), key = { _, v -> v.videoId }) { index, video ->
             ChartRailItem(
-                rank = index + 1,
                 video = video,
                 onClick = {
                     // 以「整份榜單」為佇列從該曲起播（rail 只顯示前 N 筆，佇列仍是完整清單）
@@ -396,7 +395,7 @@ private fun ChartRail(
     }
 }
 
-/** 完整榜單（可捲動，顯示方式同播放清單詳情：名次＋縮圖＋歌名＋歌手）。 */
+/** 完整榜單（可捲動，顯示方式同播放清單詳情：縮圖＋歌名＋歌手）。 */
 @Composable
 private fun ChartFullList(
     items: List<VideoResult>,
@@ -409,7 +408,6 @@ private fun ChartFullList(
     ) {
         itemsIndexed(items, key = { _, v -> v.videoId }) { index, video ->
             ChartDetailRow(
-                rank = index + 1,
                 video = video,
                 onClick = { onPlayChartQueue(items.map { it.toPlayQueueItem() }, index) },
                 onAdd = { onAdd(video) }
@@ -421,7 +419,6 @@ private fun ChartFullList(
 
 @Composable
 private fun ChartRailItem(
-    rank: Int,
     video: VideoResult,
     onClick: () -> Unit,
     onAdd: () -> Unit
@@ -439,21 +436,6 @@ private fun ChartRailItem(
                     .fillMaxWidth()
                     .height(80.dp)
             )
-            // 名次徽章（疊於縮圖左上角）
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(6.dp)
-                    .clip(MaterialTheme.shapes.small)
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    "$rank",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
             // 右下角：時長 badge 與「加入播放清單」＋並排（Row 避免兩者重疊）
             Row(
                 modifier = Modifier
@@ -502,7 +484,6 @@ private fun ChartRailItem(
 
 @Composable
 private fun ChartDetailRow(
-    rank: Int,
     video: VideoResult,
     onClick: () -> Unit,
     onAdd: () -> Unit
@@ -516,12 +497,6 @@ private fun ChartDetailRow(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                "$rank",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.width(32.dp)
-            )
             // 縮圖＋時長 badge（右下角）
             Box {
                 ChartThumbnail(
