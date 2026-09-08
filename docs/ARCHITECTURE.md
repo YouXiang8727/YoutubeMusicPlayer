@@ -11,7 +11,7 @@
 :app                 # 容器：Application、MainActivity、Navigation 圖、Manifest 聚合
 ├─ feature:search    # 搜尋頁（Screen + ViewModel）→ 依賴 feature:playlist（PlaylistPickerSheet）
 ├─ feature:playlist  # 播放清單（列表頁 + 詳情頁 + 共用 BottomSheet/Dialog）
-├─ feature:player    # 播放頁 + MusicService（前景服務、背景音訊）→ 依賴 feature:playlist
+├─ feature:player    # 無全螢幕播放頁；提供播放佇列/控制器（PlayerViewModel + PlaybackIntent）、MiniPlayerBar、MusicService（前景服務、背景音訊）→ 依賴 feature:playlist
 ├─ core:ui           # Material Theme、共用樣式（未來放共用 Composable）
 ├─ core:domain       # 純 Kotlin：Model、Repository interface、UseCase、PlayerController 介面（零 Android 依賴）
 ├─ core:data         # Room、Retrofit/OkHttp、NewPipe 解析、Repository 實作、Hilt DataModule

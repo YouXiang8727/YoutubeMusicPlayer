@@ -43,7 +43,6 @@ import androidx.navigation.navArgument
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
 import com.youxiang8727.mymediaplayer.feature.player.MiniPlayerBar
 import com.youxiang8727.mymediaplayer.feature.player.PlaybackIntent
-import com.youxiang8727.mymediaplayer.feature.player.PlayerRoute
 import com.youxiang8727.mymediaplayer.feature.player.PlayerViewModel
 import com.youxiang8727.mymediaplayer.feature.playlist.PlaylistDetailRoute
 import com.youxiang8727.mymediaplayer.feature.playlist.PlaylistListRoute
@@ -54,10 +53,6 @@ object Routes {
     const val SEARCH = "search"
     const val PLAYLIST_LIST = "playlist_list"
     const val PLAYLIST_DETAIL = "playlist_detail/{playlistId}?name={name}"
-    const val PLAYER = "player/{videoId}?title={title}"
-
-    fun player(videoId: String, title: String = "") =
-        "player/$videoId?title=${android.net.Uri.encode(title)}"
 
     fun playlistDetail(playlistId: Long, name: String = "") =
         "playlist_detail/$playlistId?name=${android.net.Uri.encode(name)}"
@@ -216,23 +211,8 @@ fun MyApp() {
                     )
                 ) {
                     PlaylistDetailRoute(
-                        onOpenVideo = { item ->
-                            navController.navigate(Routes.player(item.videoId, item.title))
-                        },
                         onBack = { navController.popBackStack() }
                     )
-                }
-                composable(
-                    route = Routes.PLAYER,
-                    arguments = listOf(
-                        navArgument("videoId") { type = NavType.StringType },
-                        navArgument("title") {
-                            type = NavType.StringType
-                            defaultValue = ""
-                        }
-                    )
-                ) {
-                    PlayerRoute(onBack = { navController.popBackStack() })
                 }
             },
             contentAlignment = androidx.compose.ui.Alignment.TopStart

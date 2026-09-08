@@ -54,7 +54,6 @@ fun PlaylistDetailScreen(
     state: PlaylistDetailUiState,
     snackbarHostState: SnackbarHostState,
     onIntent: (PlaylistDetailIntent) -> Unit,
-    onOpenVideo: (PlaylistItem) -> Unit,
     onBack: () -> Unit,
 ) {
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
@@ -127,7 +126,7 @@ fun PlaylistDetailScreen(
                     items(state.items, key = { it.videoId }) { item ->
                         PlaylistDetailCard(
                             item = item,
-                            onClick = { onOpenVideo(item) }
+                            onClick = { onIntent(PlaylistDetailIntent.Play(item)) }
                         ) {
                             onIntent(PlaylistDetailIntent.Remove(item.videoId))
                         }
@@ -203,7 +202,6 @@ private fun PlaylistDetailCard(
 @Composable
 fun PlaylistDetailRoute(
     viewModel: PlaylistDetailViewModel = hiltViewModel(),
-    onOpenVideo: (PlaylistItem) -> Unit,
     onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -217,7 +215,6 @@ fun PlaylistDetailRoute(
         state = state,
         snackbarHostState = snackbarHostState,
         onIntent = viewModel::onIntent,
-        onOpenVideo = onOpenVideo,
         onBack = onBack
     )
 }
@@ -251,8 +248,7 @@ private fun PlaylistDetailScreenEmptyPreview() {
                 isLoading = false
             ),
             snackbarHostState = remember { SnackbarHostState() },
-            onIntent = {},
-            onOpenVideo = {}
+            onIntent = {}
         ) {
             // onBack
         }
@@ -303,8 +299,7 @@ private fun PlaylistDetailScreenItemsPreview() {
                 )
             ),
             snackbarHostState = remember { SnackbarHostState() },
-            onIntent = {},
-            onOpenVideo = {}
+            onIntent = {}
         ) {
             // onBack
         }
