@@ -64,6 +64,7 @@
 - 修復 `feature:player` 既有編譯破洞：`PlaylistItem` 新增必填 `playlistId` 參數後，`PlaybackQueueBuilderTest` 建構呼叫未同步（PR #9），`./gradlew test` 恢復全綠（186 tasks）
 
 ### Removed
+- 熱門音樂榜單移除名次顯示（`feature:search` `SearchScreen`）：`ChartRailItem` 縮圖左上角名次徽章與 `ChartDetailRow` 行首名次欄一併刪除，同時移除 `rank` 參數（`ChartRail`／`ChartFullList` 仍保留 `itemsIndexed` 的 `index` 供 `onPlayChartQueue` 起播 index 使用），rail 與完整榜單文案同步改為「縮圖＋歌名＋歌手」
 - 移除全螢幕播放頁 `feature:player/PlayerScreen.kt`（含 `PlayerScreen` / `PlayerRoute` 與兩個 @Preview）：全專案已無外部引用，點擊歌單/搜尋結果改為直接播放並由底部 MiniPlayerBar 反映狀態。`PlayerViewModel` 一併瘦身——刪除僅播放頁使用的 `PlayerUiState`、`state`、`playlists`/`observePlaylists`、`startBackgroundPlayback`/`stopBackgroundPlayback`、`messages`、`onAddToPlaylist`/`createPlaylistAndAdd` 與 `SavedStateHandle`，保留 `PlaybackIntent`（Play/PlayList）、`playback`、`onPlaybackIntent` 供 MiniPlayerBar 與搜尋/歌單直接起播
 - 移除 legacy `androidx.media` 依賴（通知改由 Media3 session 提供）
 
