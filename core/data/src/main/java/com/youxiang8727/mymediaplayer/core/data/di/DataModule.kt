@@ -62,6 +62,13 @@ object DatabaseModule {
         }
     }
 
+    /** v4 → v5：playlist_items 新增可空 streamFailedAt 欄位（播放失敗標記，null = 無失敗）。 */
+    private val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE playlist_items ADD COLUMN streamFailedAt INTEGER")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
@@ -69,7 +76,7 @@ object DatabaseModule {
             context.applicationContext,
             AppDatabase::class.java,
             "mymediaplayer.db"
-        ).addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+        ).addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .fallbackToDestructiveMigration()  // 對不可預期版本仍是防禦
             .build()
     }

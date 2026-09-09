@@ -26,7 +26,8 @@ data class PlaylistDetailUiState(
     val playlistId: Long = 0L,
     val playlistName: String = "",
     val items: List<PlaylistItem> = emptyList(),
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val failedCount: Int = 0
 )
 
 sealed interface PlaylistDetailIntent {
@@ -66,7 +67,11 @@ class PlaylistDetailViewModel @Inject constructor(
         if (playlistId > 0L) {
             observePlaylistItems(playlistId)
                 .onEach { items ->
-                    _state.value = _state.value.copy(items = items, isLoading = false)
+                    _state.value = _state.value.copy(
+                        items = items,
+                        isLoading = false,
+                        failedCount = items.count { it.streamFailedAt != null }
+                    )
                 }
                 .launchIn(viewModelScope)
         } else {

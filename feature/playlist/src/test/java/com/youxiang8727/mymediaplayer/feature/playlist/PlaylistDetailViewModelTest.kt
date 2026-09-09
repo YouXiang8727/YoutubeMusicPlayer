@@ -78,6 +78,8 @@ class PlaylistDetailViewModelTest {
         override suspend fun removeItem(playlistId: Long, videoId: String) {}
         override suspend fun clearPlaylist(playlistId: Long) {}
         override suspend fun getRandomItem(playlistId: Long): PlaylistItem? = null
+        override suspend fun markStreamFailed(videoId: String, failedAt: Long) {}
+        override suspend fun clearStreamFailed(videoId: String) {}
     }
 
     /** 記錄 playQueue（暫時性佇列）與 play（Room 路徑）的呼叫供斷言。 */
@@ -174,5 +176,26 @@ class PlaylistDetailViewModelTest {
         assertTrue(h.player.playQueueCalls.isEmpty())
         assertTrue(h.player.playCalls.isEmpty())
         assertEquals("清單為空，無法播放", h.messages.last())
+    }
+
+    @Test
+    fun `failedCount 正確反映含 streamFailedAt 的項目數`() {
+        val v1Failed = v1.copy(streamFailedAt = 1725000000000L)
+        val v2Failed = v2.copy(streamFailedAt = 1725000100000L)
+        // v1 失敗、v2 失敗、v3 正常 → failedCount = 2
+        val h = buildHarness(FakePlaylistRepository(flowOf(listOf(v1Failed, v2Failed, v3))))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(3, h.vm.state.value.items.size)
+        assertEquals(2, h.vm.state.value.failedCount)
+    }
+
+    @Test
+    fun `failedCount 為零時無失敗項目`() {
+        val h = buildHarness(FakePlaylistRepository(flowOf(listOf(v1, v2, v3))))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(3, h.vm.state.value.items.size)
+        assertEquals(0, h.vm.state.value.failedCount)
     }
 }

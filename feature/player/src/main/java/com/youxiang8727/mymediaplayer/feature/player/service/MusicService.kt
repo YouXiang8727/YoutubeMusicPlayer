@@ -132,10 +132,16 @@ class MusicService : MediaSessionService() {
                 // 非 403 錯誤不攔截：維持既有 snapshot/error 顯示機制，由 UI 呈現。
             }
 
-            // 曲目成功進入播放中（READY）→ 重設該曲 403 重試次數，避免舊的高計數殘留
+            // 曲目成功進入播放中（READY）→ 重設該曲 403 重試次數，避免舊的高計數殘留；
+            // 同時清除該曲的持久化播放失敗標記（僅 Room 播放清單有對應 row，暫時性佇列為 no-op）
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY) {
-                    newPlayer.currentMediaItem?.mediaId?.let { retryCounts.remove(it) }
+                    newPlayer.currentMediaItem?.mediaId?.let { mediaId ->
+                        retryCounts.remove(mediaId)
+                        serviceScope.launch {
+                            playlistRepository.clearStreamFailed(mediaId)
+                        }
+                    }
                 }
             }
         })
@@ -415,8 +421,12 @@ class MusicService : MediaSessionService() {
         }
     }
 
-    /** 重新解析仍失敗時，依 repeatMode 切歌。 */
+    /** 重新解析仍失敗時，依 repeatMode 切歌；並持久化該曲的播放失敗標記（僅 Room 清單有 row）。 */
     private fun advanceOn403(p: ExoPlayer, videoId: String) {
+        // fire-and-forget：標記該 videoId「最近一次播放失敗」時間戳
+        serviceScope.launch {
+            playlistRepository.markStreamFailed(videoId, System.currentTimeMillis())
+        }
         when (p.repeatMode) {
             Player.REPEAT_MODE_ONE -> {
                 // 單曲循環：重播同一首（prepare 會重新載入、重新解析）

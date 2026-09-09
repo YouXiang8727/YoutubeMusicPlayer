@@ -9,6 +9,9 @@
 
 ## [Unreleased]
 
+### Added
+- **播放失敗標記**（歌單內歌曲，串流 403 自動跳歌時可辨識）：`PlaylistItem` 新增 `streamFailedAt: Long?`（最近一次播放失敗時間戳，null=無失敗）；MusicService 於 403 跳歌（`advanceOn403`）時 `markStreamFailed` 持久化標記、該曲成功播放（ExoPlayer READY）時 `clearStreamFailed` 清除（暫時性佇列對 Room 為 no-op，僅適用 Room 播放清單）。`core:data` Room `playlist_items` 新增可空 `streamFailedAt` 欄位（DB v4→v5，`MIGRATION_4_5` = `ALTER TABLE ... ADD COLUMN`，不清空既有清單），`PlaylistRepository` 新增 `markStreamFailed`/`clearStreamFailed`，`PlaylistDao` 對應新增兩個 @Query。UI：`PlaylistDetailScreen` 對失敗歌曲加 error 紅框＋「播放失敗」label，列表頂部當 `failedCount>0` 顯示「有 N 首歌曲在播放時曾發生問題」提示；`PlaylistDetailUiState` 新增 derived `failedCount`。同步修補 feature/search、playlist、discover 三模組測試 fake 的 interface 空實作。新增 PlaylistRepositoryImplTest（mark/clear）與 PlaylistDetailViewModelTest（failedCount）測試及失敗狀態 Preview
+
 ### Fixed
 - `DiscoverViewModelTest.observePlaylists` 測試對 `Playlist` 的時脈預設時間戳（`createdAt`/`updatedAt`）於斷言處**重建比較**造成 flaky（初始值與斷言各 new 一次，跨毫秒即產生不同 timestamp → 同毫秒偶過、跨毫秒必掛；CI 全新執行 289 tasks 時現形）：改為 initial 與斷言共用同一 instance
 

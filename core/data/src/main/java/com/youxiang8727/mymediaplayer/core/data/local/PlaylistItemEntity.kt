@@ -17,7 +17,8 @@ data class PlaylistItemEntity(
     val channel: String = "",
     val duration: String? = null,
     val addedAt: Long = System.currentTimeMillis(),
-    @ColumnInfo(name = "playlistId") val playlistId: Long
+    @ColumnInfo(name = "playlistId") val playlistId: Long,
+    val streamFailedAt: Long? = null
 )
 
 fun PlaylistItemEntity.toDomain() = PlaylistItem(
@@ -27,7 +28,8 @@ fun PlaylistItemEntity.toDomain() = PlaylistItem(
     channel = channel,
     duration = duration,
     addedAt = addedAt,
-    playlistId = playlistId
+    playlistId = playlistId,
+    streamFailedAt = streamFailedAt
 )
 
 fun PlaylistItem.toEntity() = PlaylistItemEntity(
@@ -37,5 +39,6 @@ fun PlaylistItem.toEntity() = PlaylistItemEntity(
     channel = channel,
     duration = duration,
     addedAt = addedAt,
-    playlistId = playlistId
+    playlistId = playlistId,
+    streamFailedAt = streamFailedAt
 )

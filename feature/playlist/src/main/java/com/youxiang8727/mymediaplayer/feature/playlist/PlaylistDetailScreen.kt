@@ -1,5 +1,7 @@
 package com.youxiang8727.mymediaplayer.feature.playlist
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,10 +15,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -98,6 +102,34 @@ fun PlaylistDetailScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
+            // 播放失敗提示
+            if (state.failedCount > 0) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                        .background(
+                            MaterialTheme.colorScheme.error.copy(alpha = 0.12f),
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "有 ${state.failedCount} 首歌曲在播放時曾發生問題",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(start = 6.dp)
+                    )
+                }
+            }
+
             when {
                 state.isLoading -> Box(
                     Modifier.fillMaxSize(),
@@ -143,7 +175,12 @@ private fun PlaylistDetailCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(onClick = onClick),
+        border = if (item.streamFailedAt != null) {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+        } else {
+            null
+        }
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -169,6 +206,14 @@ private fun PlaylistDetailCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (item.streamFailedAt != null) {
+                    Text(
+                        text = "播放失敗",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 2.dp)
                     )
                 }
             }
@@ -277,6 +322,78 @@ private fun PlaylistDetailScreenItemsPreview() {
                         thumbnailUrl = "",
                         channel = "Official",
                         duration = null,
+                        playlistId = 1
+                    )
+                )
+            ),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {}
+        ) {
+            // onBack
+        }
+    }
+}
+
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistDetailScreen - WithFailures - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistDetailScreen - WithFailures - Light"
+)
+@Composable
+private fun PlaylistDetailScreenWithFailuresPreview() {
+    MyMediaPlayerTheme {
+        PlaylistDetailScreen(
+            state = PlaylistDetailUiState(
+                playlistId = 1,
+                playlistName = "我的最愛",
+                isLoading = false,
+                failedCount = 2,
+                items = listOf(
+                    PlaylistItem(
+                        videoId = "dQw4w9WgXcQ",
+                        title = "晴天",
+                        thumbnailUrl = "",
+                        channel = "Jay Chou",
+                        duration = "4:30",
+                        playlistId = 1
+                    ),
+                    PlaylistItem(
+                        videoId = "abc12345678",
+                        title = "夜曲 Live",
+                        thumbnailUrl = "",
+                        channel = "Official",
+                        duration = null,
+                        playlistId = 1,
+                        streamFailedAt = 1725000000000L
+                    ),
+                    PlaylistItem(
+                        videoId = "xyz98765432",
+                        title = "青花瓷",
+                        thumbnailUrl = "",
+                        channel = "Jay Chou",
+                        duration = "3:58",
+                        playlistId = 1,
+                        streamFailedAt = 1725000100000L
+                    ),
+                    PlaylistItem(
+                        videoId = "def45678901",
+                        title = "稻香",
+                        thumbnailUrl = "",
+                        channel = "Jay Chou",
+                        duration = "3:42",
                         playlistId = 1
                     )
                 )
