@@ -9,6 +9,8 @@ import com.youxiang8727.mymediaplayer.core.common.DispatcherProvider
 import com.youxiang8727.mymediaplayer.core.data.di.StreamProfile
 import com.youxiang8727.mymediaplayer.core.data.local.AppDatabase
 import com.youxiang8727.mymediaplayer.core.data.local.PlaylistDao
+import com.youxiang8727.mymediaplayer.core.data.remote.SearchSuggestionDataSource
+import com.youxiang8727.mymediaplayer.core.data.remote.YoutubeSearchSuggestionDataSource
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.AudioStreamSource
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.FallbackStreamResolver
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.InnerTubeStreamSource
@@ -20,9 +22,11 @@ import com.youxiang8727.mymediaplayer.core.data.remote.stream.StreamErrorClassif
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.StreamHttpTransport
 import com.youxiang8727.mymediaplayer.core.data.repository.AudioStreamRepositoryImpl
 import com.youxiang8727.mymediaplayer.core.data.repository.PlaylistRepositoryImpl
+import com.youxiang8727.mymediaplayer.core.data.repository.SearchSuggestionRepositoryImpl
 import com.youxiang8727.mymediaplayer.core.data.repository.VideoRepositoryImpl
 import com.youxiang8727.mymediaplayer.core.domain.repository.AudioStreamRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
+import com.youxiang8727.mymediaplayer.core.domain.repository.SearchSuggestionRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.VideoRepository
 import dagger.Binds
 import dagger.Module
@@ -121,4 +125,16 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindAudioStreamRepository(impl: AudioStreamRepositoryImpl): AudioStreamRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindSearchSuggestionRepository(
+        impl: SearchSuggestionRepositoryImpl
+    ): SearchSuggestionRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindSearchSuggestionDataSource(
+        impl: YoutubeSearchSuggestionDataSource
+    ): SearchSuggestionDataSource
 }
