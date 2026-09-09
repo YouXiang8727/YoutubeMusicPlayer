@@ -20,3 +20,12 @@ annotation class BrowserProfile
 @Qualifier
 @Retention(AnnotationRetention.RUNTIME)
 annotation class StreamProfile
+
+/**
+ * 搜尋建議 profile：乾淨 client（僅逾時設定、無任何攔截器）。
+ * Google suggestqueries 建議端點不需瀏覽器 header，用乾淨 client 即可，
+ * 避免把 [BrowserProfile] 的瀏覽器 header 無謂套上。
+ */
+@Qualifier
+@Retention(AnnotationRetention.RUNTIME)
+annotation class SuggestionsProfile

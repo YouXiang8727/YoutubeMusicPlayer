@@ -2,6 +2,7 @@ package com.youxiang8727.mymediaplayer.core.data.remote
 
 import com.youxiang8727.mymediaplayer.core.data.di.BrowserProfile
 import com.youxiang8727.mymediaplayer.core.data.di.StreamProfile
+import com.youxiang8727.mymediaplayer.core.data.di.SuggestionsProfile
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -46,6 +47,16 @@ object NetworkModule {
         OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
+            .build()
+
+    /** 搜尋建議 profile：無攔截器的乾淨 client，Google suggestqueries 建議端點專用。 */
+    @Provides
+    @Singleton
+    @SuggestionsProfile
+    fun provideSuggestionsOkHttpClient(): OkHttpClient =
+        OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
             .build()
 
     @Provides

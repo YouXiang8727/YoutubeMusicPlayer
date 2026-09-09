@@ -6,11 +6,13 @@ import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
+import com.youxiang8727.mymediaplayer.core.domain.repository.SearchSuggestionRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.VideoRepository
 import com.youxiang8727.mymediaplayer.core.domain.usecase.AddToPlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.FetchTrendingSongsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchSuggestionsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchVideosUseCase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -87,24 +89,48 @@ class SearchViewModelTest {
         override suspend fun getRandomItem(playlistId: Long): PlaylistItem? = null
     }
 
+    /**
+     * 搜尋建議 Fake：記錄呼叫次數與收到的查詢；預設回空清單，
+     * 可覆寫 [resultByQuery]（依查詢回對應建議）與 [forcedFailure]（模擬網路失敗）。
+     */
+    private class FakeSuggestionRepository(
+        var resultByQuery: Map<String, List<String>> = emptyMap(),
+        var forcedFailure: Boolean = false
+    ) : SearchSuggestionRepository {
+        var suggestionCalls = 0
+        val receivedQueries = mutableListOf<String>()
+
+        override suspend fun suggestions(query: String): List<String> {
+            suggestionCalls++
+            receivedQueries += query
+            if (forcedFailure) return emptyList()
+            return resultByQuery[query] ?: emptyList()
+        }
+    }
+
     private class Harness(
         val vm: SearchViewModel,
         val repo: FakeVideoRepository,
+        val suggestionRepo: FakeSuggestionRepository,
         val messages: MutableList<String>
     )
 
-    private fun buildHarness(repo: FakeVideoRepository): Harness {
+    private fun buildHarness(
+        repo: FakeVideoRepository,
+        suggestionRepo: FakeSuggestionRepository = FakeSuggestionRepository()
+    ): Harness {
         val vm = SearchViewModel(
             SearchVideosUseCase(repo),
             AddToPlaylistUseCase(EmptyPlaylistRepository),
             CreatePlaylistUseCase(EmptyPlaylistRepository),
             ObservePlaylistsUseCase(EmptyPlaylistRepository),
-            FetchTrendingSongsUseCase(repo)
+            FetchTrendingSongsUseCase(repo),
+            SearchSuggestionsUseCase(suggestionRepo)
         )
         val messages = mutableListOf<String>()
         // 先於任何 VM 動作前訂閱 messages，確保 SharedFlow（replay=0）不會漏接。
         CoroutineScope(dispatcher).launch { vm.messages.collect { messages.add(it) } }
-        return Harness(vm, repo, messages)
+        return Harness(vm, repo, suggestionRepo, messages)
     }
 
     private fun Harness.doSearch(query: String) {
@@ -430,5 +456,160 @@ class SearchViewModelTest {
             assertEquals(listOf(v2, v3), h2.vm.state.value.trendingByRegion[region]?.items)
             assertNull(h2.vm.state.value.trendingByRegion[region]?.error)
         }
+    }
+
+    // ---------- 搜尋建議（autocomplete）流程 ----------
+
+    @Test
+    fun `輸入非空白查詢會 debounce 後抓取建議寫入 state`() {
+        val suggestionRepo = FakeSuggestionRepository(
+            resultByQuery = mapOf(
+                "周" to listOf("周杰倫", "周星馳"),
+                "周杰" to listOf("周杰倫", "周杰倫 晴天")
+            )
+        )
+        val h = buildHarness(FakeVideoRepository(), suggestionRepo)
+        dispatcher.scheduler.advanceUntilIdle() // 消化 init 的熱門榜單與建議收集 coroutine
+
+        // 快速連續輸入：只應觸發一次（最後一筆「周杰」經 debounce 後抓取）
+        h.vm.onIntent(SearchIntent.QueryChanged("周"))
+        h.vm.onIntent(SearchIntent.QueryChanged("周杰"))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(listOf("周杰倫", "周杰倫 晴天"), h.vm.state.value.suggestions)
+        assertEquals(listOf("周杰"), h.suggestionRepo.receivedQueries)
+        assertEquals(1, h.suggestionRepo.suggestionCalls)
+    }
+
+    @Test
+    fun `debounce 期間尚未到期時不觸發抓取`() {
+        val suggestionRepo = FakeSuggestionRepository(
+            resultByQuery = mapOf("周杰倫" to listOf("周杰倫 晴天"))
+        )
+        val h = buildHarness(FakeVideoRepository(), suggestionRepo)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        h.vm.onIntent(SearchIntent.QueryChanged("周杰倫"))
+        // advance 299ms（< debounce 300ms）：應尚未觸發
+        dispatcher.scheduler.advanceTimeBy(SearchViewModel.SUGGESTION_DEBOUNCE_MS - 1)
+        assertEquals(0, h.suggestionRepo.suggestionCalls)
+        assertEquals(emptyList<String>(), h.vm.state.value.suggestions)
+
+        // 推進跨越 debounce 門檻後才觸發
+        dispatcher.scheduler.advanceTimeBy(1)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(1, h.suggestionRepo.suggestionCalls)
+        assertEquals(listOf("周杰倫 晴天"), h.vm.state.value.suggestions)
+    }
+
+    @Test
+    fun `空白或清除輸入不觸發抓取且建議清空`() {
+        val suggestionRepo = FakeSuggestionRepository(
+            resultByQuery = mapOf("周" to listOf("周杰倫"))
+        )
+        val h = buildHarness(FakeVideoRepository(), suggestionRepo)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        // 空白輸入：不觸發抓取
+        h.vm.onIntent(SearchIntent.QueryChanged("   "))
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(0, h.suggestionRepo.suggestionCalls)
+        assertTrue(h.vm.state.value.suggestions.isEmpty())
+
+        // 輸入非空白取得建議後清除（✕按鈕送空白）：清空建議
+        h.vm.onIntent(SearchIntent.QueryChanged("周"))
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(listOf("周杰倫"), h.vm.state.value.suggestions)
+        h.vm.onIntent(SearchIntent.QueryChanged(""))
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(h.vm.state.value.suggestions.isEmpty())
+        assertTrue(!h.vm.state.value.searched)
+    }
+
+    @Test
+    fun `點擊建議填回搜尋框並觸發搜尋且隱藏建議`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A"))
+        )
+        val suggestionRepo = FakeSuggestionRepository(
+            resultByQuery = mapOf("周" to listOf("周杰倫"))
+        )
+        val h = buildHarness(repo, suggestionRepo)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        // 先取得建議
+        h.vm.onIntent(SearchIntent.QueryChanged("周"))
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(listOf("周杰倫"), h.vm.state.value.suggestions)
+
+        // 點擊建議
+        h.vm.onIntent(SearchIntent.SelectSuggestion("周杰倫"))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals("周杰倫", h.vm.state.value.query)
+        assertEquals(1, h.repo.searchCalls)
+        assertTrue(h.vm.state.value.searched)
+        assertTrue(h.vm.state.value.suggestions.isEmpty())
+        assertEquals(listOf(v1), h.vm.state.value.results)
+    }
+
+    @Test
+    fun `明確搜尋按鈕隱藏建議但不影響既有抓取行為`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A"))
+        )
+        val suggestionRepo = FakeSuggestionRepository(
+            resultByQuery = mapOf("周" to listOf("周杰倫"))
+        )
+        val h = buildHarness(repo, suggestionRepo)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        h.vm.onIntent(SearchIntent.QueryChanged("周"))
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(listOf("周杰倫"), h.vm.state.value.suggestions)
+
+        h.vm.onIntent(SearchIntent.Search)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(1, h.repo.searchCalls)
+        assertTrue(h.vm.state.value.suggestions.isEmpty())
+        assertEquals(listOf(v1), h.vm.state.value.results)
+    }
+
+    @Test
+    fun `建議抓取失敗優雅降級為空清單不崩潰`() {
+        // Repository 失敗回空清單（不丟例外），UI 應顯示空建議、不崩潰、不影響別的欄位
+        val suggestionRepo = FakeSuggestionRepository(forcedFailure = true)
+        val h = buildHarness(FakeVideoRepository(), suggestionRepo)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        h.vm.onIntent(SearchIntent.QueryChanged("周杰倫"))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(h.vm.state.value.suggestions.isEmpty())
+        assertNull(h.vm.state.value.error) // 建議失敗不污染搜尋錯誤欄位
+        assertTrue(!h.vm.state.value.searched)
+    }
+
+    @Test
+    fun `搜尋後遲到的建議回應不覆蓋搜尋後狀態`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A"))
+        )
+        val suggestionRepo = FakeSuggestionRepository(
+            resultByQuery = mapOf("周" to listOf("周杰倫"))
+        )
+        val h = buildHarness(repo, suggestionRepo)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        // 輸入非空白，debounce 尚未跨過門檻即執行明確搜尋
+        h.vm.onIntent(SearchIntent.QueryChanged("周"))
+        h.vm.onIntent(SearchIntent.Search)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        // 搜尋後建議應為空（未套用遲到的建議回應）
+        assertTrue(h.vm.state.value.suggestions.isEmpty())
+        assertEquals(listOf(v1), h.vm.state.value.results)
+        assertTrue(h.vm.state.value.searched)
     }
 }
