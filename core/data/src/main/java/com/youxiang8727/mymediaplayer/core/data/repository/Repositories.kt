@@ -75,6 +75,14 @@ class PlaylistRepositoryImpl @Inject constructor(
     override suspend fun clearPlaylist(playlistId: Long) =
         dao.clearPlaylist(playlistId)
 
+    // ── 播放失敗標記 ──
+
+    override suspend fun markStreamFailed(videoId: String, failedAt: Long) =
+        dao.markStreamFailed(videoId, failedAt)
+
+    override suspend fun clearStreamFailed(videoId: String) =
+        dao.clearStreamFailed(videoId)
+
     // ── 隨機 ──
 
     override suspend fun getRandomItem(playlistId: Long): PlaylistItem? =

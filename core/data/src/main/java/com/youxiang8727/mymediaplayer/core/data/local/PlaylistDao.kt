@@ -39,6 +39,13 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlist_items WHERE playlistId = :playlistId ORDER BY RANDOM() LIMIT 1")
     suspend fun getRandomItem(playlistId: Long): PlaylistItemEntity?
 
+    // ── 播放失敗標記 ──
+    @Query("UPDATE playlist_items SET streamFailedAt = :failedAt WHERE videoId = :videoId")
+    suspend fun markStreamFailed(videoId: String, failedAt: Long)
+
+    @Query("UPDATE playlist_items SET streamFailedAt = NULL WHERE videoId = :videoId")
+    suspend fun clearStreamFailed(videoId: String)
+
     // ── 級聯刪除 ──
     @Query("DELETE FROM playlist_items WHERE playlistId = :playlistId")
     suspend fun deletePlaylistWithItemsCascade(playlistId: Long)

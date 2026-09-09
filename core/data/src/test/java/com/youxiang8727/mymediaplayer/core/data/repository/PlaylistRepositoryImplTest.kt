@@ -74,6 +74,18 @@ class PlaylistRepositoryImplTest {
         override suspend fun deletePlaylistWithItemsCascade(playlistId: Long) {
             itemTable.value = itemTable.value.filterNot { it.playlistId == playlistId }
         }
+
+        override suspend fun markStreamFailed(videoId: String, failedAt: Long) {
+            itemTable.value = itemTable.value.map {
+                if (it.videoId == videoId) it.copy(streamFailedAt = failedAt) else it
+            }
+        }
+
+        override suspend fun clearStreamFailed(videoId: String) {
+            itemTable.value = itemTable.value.map {
+                if (it.videoId == videoId) it.copy(streamFailedAt = null) else it
+            }
+        }
     }
 
     private fun item(
@@ -214,5 +226,38 @@ class PlaylistRepositoryImplTest {
         val id = repository.createPlaylist("空清單")
 
         assertNull(repository.getRandomItem(id))
+    }
+
+    @Test
+    fun `markStreamFailed 標記失敗時間戳並反映在 observePlaylistItems`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val id = repository.createPlaylist("清單")
+        repository.addItem(id, item("v1", playlistId = id))
+        assertNull(repository.observePlaylistItems(id).first().single().streamFailedAt)
+
+        repository.markStreamFailed("v1", 1234L)
+
+        val items = repository.observePlaylistItems(id).first()
+        assertEquals(1234L, items.single().streamFailedAt)
+        // toEntity mapping 一併保留（Room 持久化面）
+        assertEquals(1234L, dao.itemTable.value.single().streamFailedAt)
+    }
+
+    @Test
+    fun `clearStreamFailed 清除失敗標記`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val id = repository.createPlaylist("清單")
+        repository.addItem(id, item("v1", playlistId = id))
+        repository.markStreamFailed("v1", 5678L)
+        assertEquals(5678L, repository.observePlaylistItems(id).first().single().streamFailedAt)
+
+        repository.clearStreamFailed("v1")
+
+        assertNull(repository.observePlaylistItems(id).first().single().streamFailedAt)
+        assertNull(dao.itemTable.value.single().streamFailedAt)
     }
 }

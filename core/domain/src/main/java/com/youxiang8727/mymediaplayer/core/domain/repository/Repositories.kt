@@ -33,6 +33,17 @@ interface PlaylistRepository {
     suspend fun removeItem(playlistId: Long, videoId: String)
     suspend fun clearPlaylist(playlistId: Long)
     suspend fun getRandomItem(playlistId: Long): PlaylistItem?
+
+    /**
+     * 標記某曲「播放失敗」。記錄時間戳至 [PlaylistItem.streamFailedAt]，
+     * 供播放清單 UI 顯示錯誤標記。videoId 為 playlist_items 全域主鍵，不需 playlistId。
+     */
+    suspend fun markStreamFailed(videoId: String, failedAt: Long)
+
+    /**
+     * 清除某曲的失敗標記（設回 null）。於該曲成功播放（READY）時呼叫。
+     */
+    suspend fun clearStreamFailed(videoId: String)
 }
 
 /**

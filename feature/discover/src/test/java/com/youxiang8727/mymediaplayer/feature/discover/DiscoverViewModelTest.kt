@@ -105,6 +105,8 @@ class DiscoverViewModelTest {
         override suspend fun clearPlaylist(playlistId: Long) {}
 
         override suspend fun getRandomItem(playlistId: Long): PlaylistItem? = null
+        override suspend fun markStreamFailed(videoId: String, failedAt: Long) {}
+        override suspend fun clearStreamFailed(videoId: String) {}
     }
 
     private class Harness(

@@ -36,6 +36,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -71,6 +72,10 @@ class MusicService : MediaSessionService() {
 
     /** 同一 videoId 的連續 403 自動重試次數（bounded retry，防無限迴圈）。 */
     private val retryCounts = ConcurrentHashMap<String, Int>()
+
+    /** onPlayerError 尚未落地的 markStreamFailed job（key = videoId）；
+     *  READY 時可取消，避免 mark/clear 交錯。 */
+    private val pendingFailureMarks = ConcurrentHashMap<String, Job>()
 
     override fun onCreate() {
         super.onCreate()
@@ -123,19 +128,39 @@ class MusicService : MediaSessionService() {
             }
         })
 
-        // 播放錯誤攔截：content URL 403（簽名 URL 過期/被撤銷）時自動恢復（需求 2+3）
+        // 播放錯誤攔截：所有播放錯誤都持久化失敗標記（歌單詳情頁紅框提示）；
+        // content URL 403 額外嘗試自動恢復（重新解析同曲或切歌）。
         newPlayer.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
+                // 所有播放錯誤：標記該曲失敗（fire-and-forget，僅 Room 播放清單有對應 row）
+                val videoId = newPlayer.currentMediaItem?.mediaId
+                if (videoId != null) {
+                    val markJob = serviceScope.launch {
+                        playlistRepository.markStreamFailed(videoId, System.currentTimeMillis())
+                    }
+                    pendingFailureMarks[videoId] = markJob
+                    markJob.invokeOnCompletion { pendingFailureMarks.remove(videoId) }
+                }
+                // 403 額外處理：失效 memoize + 強制重解析同曲（仍失敗則切歌）
                 if (isContentUrl403(error)) {
                     onContentUrl403(error)
                 }
                 // 非 403 錯誤不攔截：維持既有 snapshot/error 顯示機制，由 UI 呈現。
             }
 
-            // 曲目成功進入播放中（READY）→ 重設該曲 403 重試次數，避免舊的高計數殘留
+            // 曲目成功進入播放中（READY）→ 清除失敗標記：
+            //   mark（onPlayerError 提交）必然先於 clear（本處提交）送進 Room 單線程 transaction
+            //   executor；取消 pending job 是為了防止 cancel 與 DB write 之間的交錯。
+            //   暫時性佇列（非 Room 清單）的 clearStreamFailed 為 no-op，不影響。
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY) {
-                    newPlayer.currentMediaItem?.mediaId?.let { retryCounts.remove(it) }
+                    newPlayer.currentMediaItem?.mediaId?.let { mediaId ->
+                        retryCounts.remove(mediaId)
+                        pendingFailureMarks.remove(mediaId)?.cancel()
+                        serviceScope.launch {
+                            playlistRepository.clearStreamFailed(mediaId)
+                        }
+                    }
                 }
             }
         })
@@ -408,15 +433,15 @@ class MusicService : MediaSessionService() {
                 p.playWhenReady = true
             } catch (e: Exception) {
                 // 重新解析仍失敗 → 需求 3：依播放模式切歌
-                advanceOn403(p, videoId)
+                advanceOn403(p)
             } finally {
                 pending403Handling.remove(videoId)
             }
         }
     }
 
-    /** 重新解析仍失敗時，依 repeatMode 切歌。 */
-    private fun advanceOn403(p: ExoPlayer, videoId: String) {
+    /** 重新解析仍失敗時，依 repeatMode 切歌（失敗標記已於 onPlayerError 統一持久化）。 */
+    private fun advanceOn403(p: ExoPlayer) {
         when (p.repeatMode) {
             Player.REPEAT_MODE_ONE -> {
                 // 單曲循環：重播同一首（prepare 會重新載入、重新解析）
