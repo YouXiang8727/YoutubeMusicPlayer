@@ -105,6 +105,7 @@ app ──▶ feature:* ──▶ core:ui ──▶ (無)
 - [ ] `build-logic/convention`：AGP 9 built-in Kotlin 工具鏈穩定後，把各 library 重複的 build 設定抽成 convention plugin
 - [x] MusicService 升級 Media3 `MediaSessionService`（鎖屏控制、藍牙耳機按鍵）— 已於播放控制功能 PR 完成
 - [ ] NewPipe Extractor 版本鎖定策略與失效 fallback（YouTube 改版風險）
+- [ ] 搜尋建議改為**音樂導向**來源：現行 MVP 為 Google suggestqueries（偏搜尋熱詞）。追蹤方案——YT Music 建議端點／InnerTube suggestion／結合本地歷史＋收藏權重；抽換只需改 core:data 的 `SearchSuggestionRepository` 實作（UI/VM 只依賴介面，見 §7 決策）
 
 ## 7. 已知取捨（決策記錄）
 
@@ -119,6 +120,7 @@ app ──▶ feature:* ──▶ core:ui ──▶ (無)
 | 串流解析採多層 fallback（NewPipe → InnerTube IOS/ANDROID_VR 直連 → Piped 實例），不自建 poToken/BotGuard WebView | 2026 年中 YouTube 對 WEB 系 client 全面要求 po_token，匿名 bot 封鎖升級 extractor 解不了（v0.26.5 已是最新仍無解）；IOS/ANDROID_VR client 免 token 是當前可行替代但屬易腐路徑；BotGuard token 綁 session/content 且需 JS 執行環境，自建成本遠超收益；Piped 公開實例不穩定故只墊底。InnerTube client 版本失效時更新常數即可（InnerTubeStreamSource companion） |
 | 通知上隨機／循環按鈕圖示不隨狀態切換 | DefaultMediaNotificationProvider 的 custom layout 不支援 per-state icon；精確狀態以前景 App 內為準 |
 | 搜尋續頁走 innerTube POST（`youtubei/v1/search`，MWEB client）而非 GET `?continuation=` | 2026-08 多頁實測：GET 續頁回傳**整頁重新排序**（重疊 55~100%）→ 載入更多變輪迴；POST 回傳 append-only chunk（重疊 0%）。雖 MWEB client 屬易腐路徑，但 chunk 解析拆成純函數、失效改寫成本可控 |
+| 搜尋建議（autocomplete）首版用 Google suggestqueries 端點（`suggestqueries.google.com/complete/search?client=youtube&ds=yt`），非官方 API | 已先抽換成 `core:domain` 的 `SearchSuggestionRepository` interface（UI/ViewModel 只依賴介面），建議來源可隨時抽換；suggestqueries 低延遲、免 API key、極穩定，作為 MVP 快速落地。其建議可能偏「搜尋熱詞」而非「音樂導向」；音樂導向（如 YT Music 建議、InnerTube suggestion、或結合本地歷史/收藏權重）列為追蹤待辦（見 §6 Roadmap），抽換時只需改 core:data 的 `@Binds` 實作 |
 
 ## 8. AI 協作運作模式（Loop Engineering）
 
