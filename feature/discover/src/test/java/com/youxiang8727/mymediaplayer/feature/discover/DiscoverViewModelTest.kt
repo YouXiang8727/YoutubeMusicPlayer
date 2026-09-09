@@ -252,17 +252,20 @@ class DiscoverViewModelTest {
     @Test
     fun `observePlaylists 推送更新 playlists 狀態`() {
         val repo = FakeVideoRepository()
+        // Playlist 帶 default 時脈時間戳：initial 與斷言共用同一 instance，
+        // 避免兩次重建（跨毫秒）造成時間戳不等 → flaky（CI 時脈下必現）
+        val initial = Playlist(id = 1, name = "我的最愛")
         val playlistRepo = FakePlaylistRepository(
-            initialPlaylists = listOf(Playlist(id = 1, name = "我的最愛"))
+            initialPlaylists = listOf(initial)
         )
         val h = buildHarness(repo, playlistRepo)
         dispatcher.scheduler.advanceUntilIdle()
 
-        assertEquals(listOf(Playlist(id = 1, name = "我的最愛")), h.vm.playlists.value)
+        assertEquals(listOf(initial), h.vm.playlists.value)
 
-        // 新增一筆後推送：VM 應立即反映
+        // 新增一筆後推送：VM 應立即反映（updated 內含 initial 同一 instance）
         val updated = listOf(
-            Playlist(id = 1, name = "我的最愛"),
+            initial,
             Playlist(id = 2, name = "工作播放清單")
         )
         playlistRepo.playlistsFlow.value = updated
