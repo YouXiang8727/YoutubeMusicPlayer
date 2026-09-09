@@ -132,15 +132,14 @@ class MusicService : MediaSessionService() {
                 // 非 403 錯誤不攔截：維持既有 snapshot/error 顯示機制，由 UI 呈現。
             }
 
-            // 曲目成功進入播放中（READY）→ 重設該曲 403 重試次數，避免舊的高計數殘留；
-            // 同時清除該曲的持久化播放失敗標記（僅 Room 播放清單有對應 row，暫時性佇列為 no-op）
+            // 曲目成功進入播放中（READY）→ 重設該曲 403 重試次數，避免舊的高計數殘留
+            // （播放失敗標記 streamFailedAt 不在此清除：advanceOn403 的 markStreamFailed 是
+            //   fire-and-forget，若在此 clear 會在 mark 完成前就把標記擦掉，導致 UI 永遠看不到紅框。
+            //   標記保留至下次手動播放或 App 重啟。）
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY) {
                     newPlayer.currentMediaItem?.mediaId?.let { mediaId ->
                         retryCounts.remove(mediaId)
-                        serviceScope.launch {
-                            playlistRepository.clearStreamFailed(mediaId)
-                        }
                     }
                 }
             }

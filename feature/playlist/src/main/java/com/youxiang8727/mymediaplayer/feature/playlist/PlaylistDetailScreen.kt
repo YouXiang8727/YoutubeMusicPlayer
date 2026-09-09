@@ -1,7 +1,6 @@
 package com.youxiang8727.mymediaplayer.feature.playlist
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,12 +14,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -102,34 +99,6 @@ fun PlaylistDetailScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
-            // 播放失敗提示
-            if (state.failedCount > 0) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp)
-                        .background(
-                            MaterialTheme.colorScheme.error.copy(alpha = 0.12f),
-                            RoundedCornerShape(8.dp)
-                        )
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Filled.Warning,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = "有 ${state.failedCount} 首歌曲在播放時曾發生問題",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(start = 6.dp)
-                    )
-                }
-            }
-
             when {
                 state.isLoading -> Box(
                     Modifier.fillMaxSize(),
@@ -151,6 +120,19 @@ fun PlaylistDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
+                    // 播放失敗提示（清單頂部空白處）
+                    if (state.failedCount > 0) {
+                        item(key = "_failed_banner") {
+                            Text(
+                                text = "有 ${state.failedCount} 首歌曲在播放時曾發生問題",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp)
+                            )
+                        }
+                    }
                     items(state.items, key = { it.videoId }) { item ->
                         PlaylistDetailCard(
                             item = item,
