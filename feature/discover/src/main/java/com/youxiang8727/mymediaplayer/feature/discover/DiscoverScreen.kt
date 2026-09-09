@@ -41,21 +41,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.painter.ColorPainter
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
 import com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlayQueueItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.toPlayQueueItem
 import com.youxiang8727.mymediaplayer.core.ui.component.DurationBadge
+import com.youxiang8727.mymediaplayer.core.ui.component.VideoThumbnail
+import com.youxiang8727.mymediaplayer.core.ui.component.VideoThumbnailWithBadge
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
 import com.youxiang8727.mymediaplayer.feature.playlist.CreatePlaylistDialog
 import com.youxiang8727.mymediaplayer.feature.playlist.PlaylistPickerSheet
@@ -344,14 +343,13 @@ private fun ChartRailItem(
             .clip(MaterialTheme.shapes.medium)
             .clickable(onClick = onClick)
     ) {
-        Box {
-            ChartThumbnail(
-                url = video.thumbnailUrl,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(80.dp)
-            )
-            // 右下角：時長 badge 與「加入播放清單」並排（Row 避免兩者重疊）
+        VideoThumbnail(
+            url = video.thumbnailUrl,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(80.dp)
+        ) {
+            // 右下角：時長 badge 與「加入播放清單」並排
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -413,18 +411,11 @@ private fun ChartDetailRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 縮圖＋時長 badge（右下角）
-            Box {
-                ChartThumbnail(
-                    url = video.thumbnailUrl,
-                    modifier = Modifier.size(96.dp, 54.dp)
-                )
-                DurationBadge(
-                    duration = video.duration,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(4.dp)
-                )
-            }
+            VideoThumbnailWithBadge(
+                url = video.thumbnailUrl,
+                duration = video.duration,
+                modifier = Modifier.size(96.dp, 54.dp)
+            )
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -447,27 +438,6 @@ private fun ChartDetailRow(
                 Icon(Icons.Filled.Add, contentDescription = "加入播放清單")
             }
         }
-    }
-}
-
-/** 榜單縮圖（空白 URL 以主題色塊替代，placeholder/error 同播放清單慣例）。 */
-@Composable
-private fun ChartThumbnail(url: String, modifier: Modifier = Modifier) {
-    if (url.isNotBlank()) {
-        AsyncImage(
-            model = url,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = modifier.clip(MaterialTheme.shapes.small),
-            placeholder = ColorPainter(MaterialTheme.colorScheme.surfaceVariant),
-            error = ColorPainter(MaterialTheme.colorScheme.surfaceVariant)
-        )
-    } else {
-        Box(
-            modifier = modifier
-                .clip(MaterialTheme.shapes.small)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        )
     }
 }
 

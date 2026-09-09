@@ -1,6 +1,5 @@
 package com.youxiang8727.mymediaplayer.feature.playlist
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,18 +34,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.painter.ColorPainter
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
-import com.youxiang8727.mymediaplayer.core.ui.component.DurationBadge
+import com.youxiang8727.mymediaplayer.core.ui.component.VideoThumbnailWithBadge
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
 
 /** 播放清單詳情頁（無狀態） */
@@ -154,35 +149,11 @@ private fun PlaylistDetailCard(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 縮圖＋時長 badge（右下角）。包一層 Box 統一處理縮圖與 badge，避免兩分支重複。
-            Box {
-                if (item.thumbnailUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = item.thumbnailUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(96.dp, 54.dp)
-                            .clip(MaterialTheme.shapes.small),
-                        // 使用 placeholder 提升預覽與載入時的體驗
-                        placeholder = ColorPainter(MaterialTheme.colorScheme.surfaceVariant),
-                        error = ColorPainter(MaterialTheme.colorScheme.surfaceVariant)
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(96.dp, 54.dp)
-                            .clip(MaterialTheme.shapes.small)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                    )
-                }
-                DurationBadge(
-                    duration = item.duration,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(4.dp)
-                )
-            }
+            VideoThumbnailWithBadge(
+                url = item.thumbnailUrl,
+                duration = item.duration,
+                modifier = Modifier.size(96.dp, 54.dp)
+            )
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(

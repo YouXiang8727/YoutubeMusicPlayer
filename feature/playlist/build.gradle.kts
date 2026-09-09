@@ -37,7 +37,6 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
-    implementation(libs.coil.compose)
     implementation(libs.androidx.compose.material.icons)
 
     testImplementation(libs.junit)

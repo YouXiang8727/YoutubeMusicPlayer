@@ -1,7 +1,6 @@
 package com.youxiang8727.mymediaplayer.feature.search
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,19 +40,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
-import com.youxiang8727.mymediaplayer.core.ui.component.DurationBadge
+import com.youxiang8727.mymediaplayer.core.ui.component.VideoThumbnailWithBadge
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
 import com.youxiang8727.mymediaplayer.feature.playlist.CreatePlaylistDialog
 import com.youxiang8727.mymediaplayer.feature.playlist.PlaylistPickerSheet
@@ -309,32 +304,11 @@ private fun VideoCard(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 縮圖＋時長 badge（右下角）
-            Box {
-                if (video.thumbnailUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = video.thumbnailUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(96.dp, 54.dp)
-                            .clip(MaterialTheme.shapes.small)
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(96.dp, 54.dp)
-                            .clip(MaterialTheme.shapes.small)
-                            .background(Color.LightGray)
-                    )
-                }
-                DurationBadge(
-                    duration = video.duration,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(4.dp)
-                )
-            }
+            VideoThumbnailWithBadge(
+                url = video.thumbnailUrl,
+                duration = video.duration,
+                modifier = Modifier.size(96.dp, 54.dp)
+            )
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
