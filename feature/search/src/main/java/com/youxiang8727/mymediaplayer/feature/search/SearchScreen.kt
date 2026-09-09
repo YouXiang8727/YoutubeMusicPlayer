@@ -6,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,11 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
@@ -47,7 +43,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -56,11 +51,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
-import com.youxiang8727.mymediaplayer.core.domain.model.PlayQueueItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
-import com.youxiang8727.mymediaplayer.core.domain.model.toPlayQueueItem
 import com.youxiang8727.mymediaplayer.core.ui.component.DurationBadge
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
 import com.youxiang8727.mymediaplayer.feature.playlist.CreatePlaylistDialog
@@ -74,8 +66,7 @@ fun SearchScreen(
     snackbarHostState: SnackbarHostState,
     onIntent: (SearchIntent) -> Unit,
     onPlayVideo: (VideoResult) -> Unit,
-    onCreatePlaylistAndAdd: (name: String, video: VideoResult) -> Unit,
-    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit = { _, _ -> }
+    onCreatePlaylistAndAdd: (name: String, video: VideoResult) -> Unit
 ) {
     // 顯示播放清單選擇 BottomSheet（帶影片資料）
     var showPickerVideo by remember { mutableStateOf<VideoResult?>(null) }
@@ -83,11 +74,9 @@ fun SearchScreen(
     var showCreateDialog by remember { mutableStateOf(false) }
     // 待建立清單後加入的影片（BottomSheet 關閉後仍需保留）
     var pendingCreateVideo by remember { mutableStateOf<VideoResult?>(null) }
-    // 展開完整榜單的區域（null = 全部收合成 rail 並排）（同 feature:search 內以 state 切換，不新增 nav route）
-    var fullChartRegion by remember { mutableStateOf<ChartRegion?>(null) }
 
-    // 已搜尋時攔截系統返回鍵為「清除搜尋」回到推薦頁；未搜尋（searched == false）時
-    // enabled = false 保持系統預設行為（退出 App）。
+    // 已搜尋時攔截系統返回鍵為「清除搜尋」回到空狀態（最近搜尋）；未搜尋（searched == false）
+    // 時 enabled = false 保持系統預設行為（退出 App）。
     BackHandler(enabled = state.searched) {
         onIntent(SearchIntent.QueryChanged(""))
     }
@@ -134,48 +123,55 @@ fun SearchScreen(
             Spacer(Modifier.height(12.dp))
 
             when {
-                // 空狀態（尚未搜尋）：熱門音樂榜單區塊（失敗不擋搜尋，搜尋框仍在上方可用）
+                // 空狀態（尚未搜尋）：顯示最近搜尋紀錄；無紀錄時顯示提示文字
                 !state.searched -> {
-                    Text(
-                        "輸入關鍵字開始搜尋",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    val expandedRegion = fullChartRegion
-                    if (expandedRegion != null) {
-                        // 單一區域完整榜單：TrendingSection 內部的 ChartFullList LazyColumn
-                        // 直接掛在普通 Column 下（無垂直 LazyColumn 巢狀）
-                        TrendingSection(
-                            title = expandedRegion.displayTitle(),
-                            trending = state.trendingByRegion[expandedRegion] ?: TrendingState(),
-                            showFullChart = true,
-                            onShowFullChart = {},
-                            onBackToRail = { fullChartRegion = null },
-                            onRetry = { onIntent(SearchIntent.TrendingRetry) },
-                            onPlayChartQueue = onPlayChartQueue,
-                            onAdd = { showPickerVideo = it }
-                        )
-                    } else {
-                        // 四區域 rail 並排：垂直 LazyColumn 承載，避免 4 條 rail 超出螢幕高度
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
-                            modifier = Modifier.fillMaxSize()
+                    if (state.history.isNotEmpty()) {
+                        // 標題列：「最近搜尋」＋清除全部
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            items(ChartRegion.DISPLAY_ORDER) { region ->
-                                TrendingSection(
-                                    title = region.displayTitle(),
-                                    trending = state.trendingByRegion[region] ?: TrendingState(),
-                                    showFullChart = false,
-                                    onShowFullChart = { fullChartRegion = region },
-                                    onBackToRail = {},
-                                    onRetry = { onIntent(SearchIntent.TrendingRetry) },
-                                    onPlayChartQueue = onPlayChartQueue,
-                                    onAdd = { showPickerVideo = it }
+                            Text(
+                                "最近搜尋",
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(
+                                onClick = { onIntent(SearchIntent.ClearHistory) }
+                            ) { Text("清除全部") }
+                        }
+                        // 每筆紀錄一列：icon + query（與 SuggestionList 視覺一致），
+                        // 點擊行為等同點 autocomplete 建議：填回搜尋框並直接搜尋
+                        state.history.forEach { query ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onIntent(SearchIntent.SelectSuggestion(query)) }
+                                    .padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Filled.Search,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = query,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            item { Spacer(Modifier.height(24.dp)) }
                         }
+                    } else {
+                        Text(
+                            "輸入關鍵字開始搜尋",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
                     }
                 }
 
@@ -255,9 +251,6 @@ fun SearchScreen(
     }
 }
 
-/** 熱門榜單 rail 顯示筆數上限（詳情完整清單不截斷）。 */
-private const val TRENDING_RAIL_LIMIT = 10
-
 /**
  * 搜尋建議下拉清單（autocomplete）。唯讀呈現 [suggestions]，點擊任一項以 [onSelect] 回報
  * （由 ViewModel 填回搜尋框並觸發搜尋）。
@@ -298,314 +291,6 @@ private fun SuggestionList(
                 }
             }
         }
-    }
-}
-
-/** 各區域榜單的顯示標題。 */
-private fun ChartRegion.displayTitle(): String = when (this) {
-    ChartRegion.TAIWAN -> "台灣熱門音樂"
-    ChartRegion.WESTERN -> "西洋熱門音樂"
-    ChartRegion.JAPAN -> "日本熱門音樂"
-    ChartRegion.KOREA -> "韓國熱門音樂"
-}
-
-/**
- * 單一區域的熱門音樂榜單區塊（僅在空狀態 `searched == false` 顯示）。
- * rail（前 [TRENDING_RAIL_LIMIT] 筆）⇄ 完整清單兩態以 [showFullChart] 切換；
- * 載入中／失敗（重試）／空榜單三態都有對應 UI。
- */
-@Composable
-private fun TrendingSection(
-    title: String,
-    trending: TrendingState,
-    showFullChart: Boolean,
-    onShowFullChart: () -> Unit,
-    onBackToRail: () -> Unit,
-    onRetry: () -> Unit,
-    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
-    onAdd: (VideoResult) -> Unit
-) {
-    when {
-        trending.loading -> Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 48.dp),
-            contentAlignment = Alignment.Center
-        ) { CircularProgressIndicator() }
-
-        else -> {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (showFullChart) {
-                    IconButton(onClick = onBackToRail) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回熱門列表")
-                    }
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.weight(1f)
-                    )
-                } else {
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f)
-                    )
-                    TextButton(onClick = onShowFullChart) { Text("查看完整榜單") }
-                }
-            }
-
-            when {
-                trending.error != null -> TrendingError(
-                    message = trending.error,
-                    onRetry = onRetry
-                )
-
-                trending.items.isEmpty() -> Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "暫無熱門歌曲",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                showFullChart -> ChartFullList(
-                    items = trending.items,
-                    onPlayChartQueue = onPlayChartQueue,
-                    onAdd = onAdd
-                )
-
-                else -> ChartRail(
-                    items = trending.items,
-                    onPlayChartQueue = onPlayChartQueue,
-                    onAdd = onAdd
-                )
-            }
-        }
-    }
-}
-
-/** 熱門榜單載入失敗（內嵌重試，不擋搜尋）。 */
-@Composable
-private fun TrendingError(message: String?, onRetry: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            "熱門榜單載入失敗",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        if (message != null) {
-            Text(
-                message,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-        }
-        Button(
-            onClick = onRetry,
-            modifier = Modifier.padding(top = 12.dp)
-        ) { Text("重試") }
-    }
-}
-
-/** rail（橫向捲動）：前 [TRENDING_RAIL_LIMIT] 筆，名次＋縮圖＋歌名＋歌手。 */
-@Composable
-private fun ChartRail(
-    items: List<VideoResult>,
-    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
-    onAdd: (VideoResult) -> Unit
-) {
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(vertical = 8.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        itemsIndexed(items.take(TRENDING_RAIL_LIMIT), key = { _, v -> v.videoId }) { index, video ->
-            ChartRailItem(
-                video = video,
-                onClick = {
-                    // 以「整份榜單」為佇列從該曲起播（rail 只顯示前 N 筆，佇列仍是完整清單）
-                    onPlayChartQueue(items.map { it.toPlayQueueItem() }, index)
-                },
-                onAdd = { onAdd(video) }
-            )
-        }
-    }
-}
-
-/** 完整榜單（可捲動，顯示方式同播放清單詳情：縮圖＋歌名＋歌手）。 */
-@Composable
-private fun ChartFullList(
-    items: List<VideoResult>,
-    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
-    onAdd: (VideoResult) -> Unit
-) {
-    LazyColumn(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        itemsIndexed(items, key = { _, v -> v.videoId }) { index, video ->
-            ChartDetailRow(
-                video = video,
-                onClick = { onPlayChartQueue(items.map { it.toPlayQueueItem() }, index) },
-                onAdd = { onAdd(video) }
-            )
-        }
-        item { Spacer(Modifier.height(24.dp)) }
-    }
-}
-
-@Composable
-private fun ChartRailItem(
-    video: VideoResult,
-    onClick: () -> Unit,
-    onAdd: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .width(140.dp)
-            .clip(MaterialTheme.shapes.medium)
-            .clickable(onClick = onClick)
-    ) {
-        Box {
-            ChartThumbnail(
-                url = video.thumbnailUrl,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(80.dp)
-            )
-            // 右下角：時長 badge 與「加入播放清單」＋並排（Row 避免兩者重疊）
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                DurationBadge(duration = video.duration)
-                // 獨立可點擊區域（在整卡 onClick 之前攔截），疊於縮圖右下角。
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clip(MaterialTheme.shapes.small)
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
-                        .clickable(onClick = onAdd),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Filled.Add,
-                        contentDescription = "加入播放清單",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = video.title,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-        if (video.channel.isNotBlank()) {
-            Text(
-                text = video.channel,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-@Composable
-private fun ChartDetailRow(
-    video: VideoResult,
-    onClick: () -> Unit,
-    onAdd: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 縮圖＋時長 badge（右下角）
-            Box {
-                ChartThumbnail(
-                    url = video.thumbnailUrl,
-                    modifier = Modifier.size(96.dp, 54.dp)
-                )
-                DurationBadge(
-                    duration = video.duration,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(4.dp)
-                )
-            }
-            Spacer(Modifier.size(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = video.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (video.channel.isNotBlank()) {
-                    Text(
-                        text = video.channel,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-            IconButton(onClick = onAdd) {
-                Icon(Icons.Filled.Add, contentDescription = "加入播放清單")
-            }
-        }
-    }
-}
-
-/** 榜單縮圖（空白 URL 以主題色塊替代，placeholder/error 同播放清單慣例）。 */
-@Composable
-private fun ChartThumbnail(url: String, modifier: Modifier = Modifier) {
-    if (url.isNotBlank()) {
-        AsyncImage(
-            model = url,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = modifier.clip(MaterialTheme.shapes.small),
-            placeholder = ColorPainter(MaterialTheme.colorScheme.surfaceVariant),
-            error = ColorPainter(MaterialTheme.colorScheme.surfaceVariant)
-        )
-    } else {
-        Box(
-            modifier = modifier
-                .clip(MaterialTheme.shapes.small)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        )
     }
 }
 
@@ -716,8 +401,7 @@ internal fun LoadMoreFooter(
 @Composable
 fun SearchRoute(
     viewModel: SearchViewModel = hiltViewModel(),
-    onPlayVideo: (VideoResult) -> Unit,
-    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit = { _, _ -> }
+    onPlayVideo: (VideoResult) -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
@@ -733,8 +417,7 @@ fun SearchRoute(
         snackbarHostState = snackbarHostState,
         onIntent = viewModel::onIntent,
         onPlayVideo = onPlayVideo,
-        onCreatePlaylistAndAdd = viewModel::createPlaylistAndAdd,
-        onPlayChartQueue = onPlayChartQueue
+        onCreatePlaylistAndAdd = viewModel::createPlaylistAndAdd
     )
 }
 
@@ -937,18 +620,7 @@ private fun SearchScreenResultsLoadingMorePreview() {
     }
 }
 
-/** 產生榜單 Preview 用假資料（縮圖留空以主題色塊呈現，與既有 Preview 慣例一致）。 */
-private fun trendingPreviewItems(region: ChartRegion, count: Int): List<VideoResult> =
-    List(count) { i ->
-        VideoResult(
-            "trending-${region.name}-$i",
-            "${region.displayTitle()} Top ${i + 1}",
-            "",
-            "歌手 $i",
-            "3:4${i % 10}"
-        )
-    }
-
+/*** 產生「最近搜尋」Preview 用假資料。 */
 @Preview(
     showBackground = true,
     uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
@@ -956,7 +628,7 @@ private fun trendingPreviewItems(region: ChartRegion, count: Int): List<VideoRes
     fontScale = 1.0f,
     device = Devices.PIXEL_7_PRO,
     group = "feature-search",
-    name = "SearchScreen - Trending Loading - Dark"
+    name = "SearchScreen - History - Dark"
 )
 @Preview(
     showBackground = true,
@@ -965,134 +637,14 @@ private fun trendingPreviewItems(region: ChartRegion, count: Int): List<VideoRes
     fontScale = 1.0f,
     device = Devices.PIXEL_7_PRO,
     group = "feature-search",
-    name = "SearchScreen - Trending Loading - Light"
+    name = "SearchScreen - History - Light"
 )
 @Composable
-private fun SearchScreenTrendingLoadingPreview() {
+private fun SearchScreenHistoryPreview() {
     MyMediaPlayerTheme {
-        // 初始載入：全部區域皆在載入中，驗證各區域獨立 spinner
         SearchScreen(
             state = SearchUiState(
-                trendingByRegion = ChartRegion.DISPLAY_ORDER.associateWith {
-                    TrendingState(loading = true)
-                }
-            ),
-            playlists = emptyList(),
-            snackbarHostState = remember { SnackbarHostState() },
-            onIntent = {},
-            onPlayVideo = {},
-            onCreatePlaylistAndAdd = { _, _ -> }
-        )
-    }
-}
-
-@Preview(
-    showBackground = true,
-    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
-    locale = "zh_TW",
-    fontScale = 1.0f,
-    device = Devices.PIXEL_7_PRO,
-    group = "feature-search",
-    name = "SearchScreen - Trending Rail - Dark"
-)
-@Preview(
-    showBackground = true,
-    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
-    locale = "zh_TW",
-    fontScale = 1.0f,
-    device = Devices.PIXEL_7_PRO,
-    group = "feature-search",
-    name = "SearchScreen - Trending Rail - Light"
-)
-@Composable
-private fun SearchScreenTrendingRailPreview() {
-    MyMediaPlayerTheme {
-        // 台灣 12 筆 > rail 上限 10，驗證截斷只顯示前 10 筆；西洋 5 筆並排驗證第二條 rail
-        SearchScreen(
-            state = SearchUiState(
-                trendingByRegion = mapOf(
-                    ChartRegion.TAIWAN to TrendingState(
-                        items = trendingPreviewItems(ChartRegion.TAIWAN, 12)
-                    ),
-                    ChartRegion.WESTERN to TrendingState(
-                        items = trendingPreviewItems(ChartRegion.WESTERN, 5)
-                    )
-                )
-            ),
-            playlists = emptyList(),
-            snackbarHostState = remember { SnackbarHostState() },
-            onIntent = {},
-            onPlayVideo = {},
-            onCreatePlaylistAndAdd = { _, _ -> }
-        )
-    }
-}
-
-@Preview(
-    showBackground = true,
-    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
-    locale = "zh_TW",
-    fontScale = 1.0f,
-    device = Devices.PIXEL_7_PRO,
-    group = "feature-search",
-    name = "SearchScreen - Trending Full Chart - Dark"
-)
-@Preview(
-    showBackground = true,
-    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
-    locale = "zh_TW",
-    fontScale = 1.0f,
-    device = Devices.PIXEL_7_PRO,
-    group = "feature-search",
-    name = "SearchScreen - Trending Full Chart - Light"
-)
-@Composable
-private fun SearchScreenTrendingFullChartPreview() {
-    MyMediaPlayerTheme {
-        // 單一區域完整榜單（50 筆 > rail 上限，驗證完整清單不截斷）
-        TrendingSection(
-            title = ChartRegion.TAIWAN.displayTitle(),
-            trending = TrendingState(items = trendingPreviewItems(ChartRegion.TAIWAN, 50)),
-            showFullChart = true,
-            onShowFullChart = {},
-            onBackToRail = {},
-            onRetry = {},
-            onPlayChartQueue = { _, _ -> },
-            onAdd = {}
-        )
-    }
-}
-
-@Preview(
-    showBackground = true,
-    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
-    locale = "zh_TW",
-    fontScale = 1.0f,
-    device = Devices.PIXEL_7_PRO,
-    group = "feature-search",
-    name = "SearchScreen - Trending Error - Dark"
-)
-@Preview(
-    showBackground = true,
-    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
-    locale = "zh_TW",
-    fontScale = 1.0f,
-    device = Devices.PIXEL_7_PRO,
-    group = "feature-search",
-    name = "SearchScreen - Trending Error - Light"
-)
-@Composable
-private fun SearchScreenTrendingErrorPreview() {
-    MyMediaPlayerTheme {
-        // 台灣載入失敗（顯示重試）、西洋正常載入：驗證單一區域失敗不影響其他區域
-        SearchScreen(
-            state = SearchUiState(
-                trendingByRegion = mapOf(
-                    ChartRegion.TAIWAN to TrendingState(error = "charts.youtube.com (HTTP 403)"),
-                    ChartRegion.WESTERN to TrendingState(
-                        items = trendingPreviewItems(ChartRegion.WESTERN, 5)
-                    )
-                )
+                history = listOf("周杰倫 晴天", "五月天", "IU 新歌", "YOASOBI")
             ),
             playlists = emptyList(),
             snackbarHostState = remember { SnackbarHostState() },

@@ -1,24 +1,28 @@
 package com.youxiang8727.mymediaplayer.feature.search
 
-import com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
+import com.youxiang8727.mymediaplayer.core.domain.repository.SearchHistoryRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.SearchSuggestionRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.VideoRepository
+import com.youxiang8727.mymediaplayer.core.domain.usecase.AddSearchHistoryUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.AddToPlaylistUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.ClearSearchHistoryUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
-import com.youxiang8727.mymediaplayer.core.domain.usecase.FetchTrendingSongsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.ObserveSearchHistoryUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchSuggestionsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchVideosUseCase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -50,19 +54,13 @@ class SearchViewModelTest {
 
     /**
      * 依 token 區分初次搜尋與載入更多回傳；記錄呼叫次數與收到的 token。
-     * 熱門榜單：預設所有 region 回傳同一 [trendingResult]；可用 [trendingResultsByRegion]
-     * 針對單一 region 覆寫結果（區域獨立性測試用）。記錄收到的 region 供「全區域皆被抓取」斷言。
      */
     private class FakeVideoRepository(
         var firstPageResult: Result<VideoSearchPage> = Result.success(VideoSearchPage(emptyList())),
-        var loadMoreResult: Result<VideoSearchPage> = Result.success(VideoSearchPage(emptyList())),
-        var trendingResult: Result<List<VideoResult>> = Result.success(emptyList()),
-        var trendingResultsByRegion: Map<ChartRegion, Result<List<VideoResult>>> = emptyMap()
+        var loadMoreResult: Result<VideoSearchPage> = Result.success(VideoSearchPage(emptyList()))
     ) : VideoRepository {
         var searchCalls = 0
         val receivedTokens = mutableListOf<String?>()
-        var trendingCalls = 0
-        val receivedTrendingRegions = mutableListOf<ChartRegion>()
 
         override suspend fun search(query: String, continuationToken: String?): Result<VideoSearchPage> {
             searchCalls++
@@ -70,11 +68,8 @@ class SearchViewModelTest {
             return if (continuationToken == null) firstPageResult else loadMoreResult
         }
 
-        override suspend fun fetchTrendingSongs(region: ChartRegion): Result<List<VideoResult>> {
-            trendingCalls++
-            receivedTrendingRegions += region
-            return trendingResultsByRegion[region] ?: trendingResult
-        }
+        override suspend fun fetchTrendingSongs(region: com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion): Result<List<VideoResult>> =
+            Result.success(emptyList())
     }
 
     private object EmptyPlaylistRepository : PlaylistRepository {
@@ -108,29 +103,68 @@ class SearchViewModelTest {
         }
     }
 
+    /**
+     * 搜尋紀錄 Fake：in-memory 實作 [SearchHistoryRepository]。
+     * 語意與 core:data 實作一致：trim、空白忽略、去重置頂、上限 10。
+     */
+    private class FakeSearchHistoryRepository : SearchHistoryRepository {
+        private val _history = MutableStateFlow<List<String>>(emptyList())
+
+        var addCalls = 0
+        val addedQueries = mutableListOf<String>()
+        var clearCalls = 0
+
+        override suspend fun add(query: String) {
+            val trimmed = query.trim()
+            if (trimmed.isBlank()) return
+            addCalls++
+            addedQueries += trimmed
+            _history.update { current ->
+                val deduped = current.filter { it != trimmed }
+                (listOf(trimmed) + deduped).take(10)
+            }
+        }
+
+        override fun observeAll(): Flow<List<String>> = _history
+
+        override suspend fun clear() {
+            clearCalls++
+            _history.value = emptyList()
+        }
+
+        /** 測試輔助：直接設定歷史資料（模擬外部變更）。 */
+        fun seedHistory(items: List<String>) {
+            _history.value = items
+        }
+    }
+
     private class Harness(
         val vm: SearchViewModel,
         val repo: FakeVideoRepository,
         val suggestionRepo: FakeSuggestionRepository,
+        val historyRepo: FakeSearchHistoryRepository,
         val messages: MutableList<String>
     )
 
     private fun buildHarness(
-        repo: FakeVideoRepository,
-        suggestionRepo: FakeSuggestionRepository = FakeSuggestionRepository()
+        repo: FakeVideoRepository = FakeVideoRepository(),
+        suggestionRepo: FakeSuggestionRepository = FakeSuggestionRepository(),
+        historyRepo: FakeSearchHistoryRepository = FakeSearchHistoryRepository()
     ): Harness {
         val vm = SearchViewModel(
-            SearchVideosUseCase(repo),
-            AddToPlaylistUseCase(EmptyPlaylistRepository),
-            CreatePlaylistUseCase(EmptyPlaylistRepository),
-            ObservePlaylistsUseCase(EmptyPlaylistRepository),
-            FetchTrendingSongsUseCase(repo),
-            SearchSuggestionsUseCase(suggestionRepo)
+            searchVideos = SearchVideosUseCase(repo),
+            addToPlaylist = AddToPlaylistUseCase(EmptyPlaylistRepository),
+            createPlaylist = CreatePlaylistUseCase(EmptyPlaylistRepository),
+            observePlaylists = ObservePlaylistsUseCase(EmptyPlaylistRepository),
+            searchSuggestions = SearchSuggestionsUseCase(suggestionRepo),
+            observeSearchHistory = ObserveSearchHistoryUseCase(historyRepo),
+            addSearchHistory = AddSearchHistoryUseCase(historyRepo),
+            clearSearchHistory = ClearSearchHistoryUseCase(historyRepo)
         )
         val messages = mutableListOf<String>()
         // 先於任何 VM 動作前訂閱 messages，確保 SharedFlow（replay=0）不會漏接。
         CoroutineScope(dispatcher).launch { vm.messages.collect { messages.add(it) } }
-        return Harness(vm, repo, suggestionRepo, messages)
+        return Harness(vm, repo, suggestionRepo, historyRepo, messages)
     }
 
     private fun Harness.doSearch(query: String) {
@@ -143,6 +177,8 @@ class SearchViewModelTest {
         vm.onIntent(SearchIntent.LoadMore)
         dispatcher.scheduler.advanceUntilIdle()
     }
+
+    // ==================== 搜尋 & 分頁 ====================
 
     @Test
     fun `初次搜尋成功時 results 被替換且 nextPageToken 更新`() {
@@ -255,20 +291,18 @@ class SearchViewModelTest {
     }
 
     @Test
-    fun `空白 query 重置搜尋狀態回推薦頁且保留熱門榜單快取`() {
+    fun `空白 query 重置搜尋狀態回空狀態`() {
         val repo = FakeVideoRepository(
-            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A")),
-            trendingResult = Result.success(listOf(v1, v2))
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A"))
         )
         val h = buildHarness(repo)
-        dispatcher.scheduler.advanceUntilIdle() // 載入熱門榜單快取
 
         // 先執行搜尋，進入已搜尋狀態
         h.doSearch("晴天")
         assertTrue(h.vm.state.value.searched)
         assertEquals(listOf(v1), h.vm.state.value.results)
 
-        // 收到空白 QueryChanged → 重置回推薦頁（清除搜尋）
+        // 收到空白 QueryChanged → 重置回空狀態（清除搜尋）
         h.vm.onIntent(SearchIntent.QueryChanged(""))
         val st = h.vm.state.value
         assertTrue(!st.searched)
@@ -277,12 +311,6 @@ class SearchViewModelTest {
         assertTrue(!st.isLoading)
         assertTrue(!st.isLoadingMore)
         assertNull(st.error)
-
-        // 熱門榜單快取保留，返回時直接顯示
-        for (region in ChartRegion.DISPLAY_ORDER) {
-            assertEquals(listOf(v1, v2), st.trendingByRegion[region]?.items)
-            assertNull(st.trendingByRegion[region]?.error)
-        }
     }
 
     @Test
@@ -322,143 +350,101 @@ class SearchViewModelTest {
         assertTrue(h.messages.contains("已無更多結果"))
     }
 
+    // ==================== 搜尋紀錄（history） ====================
+
     @Test
-    fun `init 自動載入各區域熱門榜單成功寫入 trendingByRegion`() {
-        val repo = FakeVideoRepository(
-            trendingResult = Result.success(listOf(v1, v2, v3))
-        )
-        val h = buildHarness(repo)
+    fun `init 觀察歷史 repo 有資料則 state history 對應`() {
+        val historyRepo = FakeSearchHistoryRepository()
+        historyRepo.seedHistory(listOf("晴天", "七里香"))
+        val h = buildHarness(historyRepo = historyRepo)
         dispatcher.scheduler.advanceUntilIdle()
 
-        // 所有區域都應有結果（FakeRepository 對任何 region 回傳相同結果）
-        for (region in ChartRegion.DISPLAY_ORDER) {
-            assertEquals(
-                listOf(v1, v2, v3),
-                h.vm.state.value.trendingByRegion[region]?.items
-            )
-            assertNull(h.vm.state.value.trendingByRegion[region]?.error)
-        }
-        // init 載入不干擾搜尋狀態（仍為空狀態）
-        assertTrue(!h.vm.state.value.searched)
-        assertEquals(ChartRegion.DISPLAY_ORDER.size, h.repo.trendingCalls)
+        assertEquals(listOf("晴天", "七里香"), h.vm.state.value.history)
     }
 
     @Test
-    fun `init 熱門榜單載入失敗寫入各區域 error 且 items 為空`() {
-        val repo = FakeVideoRepository(
-            trendingResult = Result.failure(RuntimeException("charts down"))
-        )
-        val h = buildHarness(repo)
+    fun `repo 推送更新後 state history 同步更新`() {
+        val historyRepo = FakeSearchHistoryRepository()
+        val h = buildHarness(historyRepo = historyRepo)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(h.vm.state.value.history.isEmpty())
+
+        // 模擬外部變更（例如其他畫面觸發搜尋）
+        historyRepo.seedHistory(listOf("夜曲"))
         dispatcher.scheduler.advanceUntilIdle()
 
-        for (region in ChartRegion.DISPLAY_ORDER) {
-            assertEquals("charts down", h.vm.state.value.trendingByRegion[region]?.error)
-            assertEquals(emptyList<VideoResult>(), h.vm.state.value.trendingByRegion[region]?.items)
-        }
-        assertNull(h.vm.state.value.error) // 不污染搜尋錯誤欄位
+        assertEquals(listOf("夜曲"), h.vm.state.value.history)
     }
 
     @Test
-    fun `init 依 DISPLAY_ORDER 抓取所有區域各一次`() {
-        val repo = FakeVideoRepository()
-        val h = buildHarness(repo)
-        dispatcher.scheduler.advanceUntilIdle()
+    fun `Search 提交後 repo 記錄該 query`() {
+        val historyRepo = FakeSearchHistoryRepository()
+        val h = buildHarness(historyRepo = historyRepo)
+        h.doSearch("晴天")
 
-        // fake 記錄收到的 region：應恰好涵蓋 DISPLAY_ORDER 所有區域、各一次
-        assertEquals(ChartRegion.DISPLAY_ORDER.toSet(), h.repo.receivedTrendingRegions.toSet())
-        assertEquals(ChartRegion.DISPLAY_ORDER.size, h.repo.receivedTrendingRegions.size)
-        assertEquals(ChartRegion.DISPLAY_ORDER.size, h.repo.trendingCalls)
-        // 全區域皆載入完成（無 error）
-        for (region in ChartRegion.DISPLAY_ORDER) {
-            assertNull(h.vm.state.value.trendingByRegion[region]?.error)
-        }
+        assertEquals(1, h.historyRepo.addCalls)
+        assertEquals("晴天", h.historyRepo.addedQueries.last())
+        // state 也同步（因為 repo 會推送）
+        assertEquals(listOf("晴天"), h.vm.state.value.history)
     }
 
     @Test
-    fun `單一區域失敗不影響其他區域的榜單內容`() {
-        // 僅 JAPAN 失敗，其餘區域成功：驗證區域獨立性
-        val repo = FakeVideoRepository(
-            trendingResult = Result.success(listOf(v1, v2)),
-            trendingResultsByRegion = mapOf(
-                ChartRegion.JAPAN to Result.failure(RuntimeException("jp down"))
-            )
-        )
-        val h = buildHarness(repo)
+    fun `SelectSuggestion 提交後 repo 記錄該 query`() {
+        val historyRepo = FakeSearchHistoryRepository()
+        val h = buildHarness(historyRepo = historyRepo)
+        h.vm.onIntent(SearchIntent.SelectSuggestion("周杰倫"))
         dispatcher.scheduler.advanceUntilIdle()
 
-        // 失敗區域：error 寫入、items 為空
-        assertEquals("jp down", h.vm.state.value.trendingByRegion[ChartRegion.JAPAN]?.error)
-        assertEquals(emptyList<VideoResult>(), h.vm.state.value.trendingByRegion[ChartRegion.JAPAN]?.items)
-        // 其餘區域不受影響：items 完好、無 error
-        for (region in ChartRegion.DISPLAY_ORDER.filter { it != ChartRegion.JAPAN }) {
-            assertEquals(listOf(v1, v2), h.vm.state.value.trendingByRegion[region]?.items)
-            assertNull(h.vm.state.value.trendingByRegion[region]?.error)
-        }
-        // 失敗與成功區域皆被抓取
-        assertEquals(ChartRegion.DISPLAY_ORDER.toSet(), h.repo.receivedTrendingRegions.toSet())
+        assertEquals(1, h.historyRepo.addCalls)
+        assertEquals("周杰倫", h.historyRepo.addedQueries.last())
+        assertEquals(listOf("周杰倫"), h.vm.state.value.history)
     }
 
     @Test
-    fun `TrendingRetry 重試成功清除錯誤並寫入各區域榜單`() {
-        val repo = FakeVideoRepository(
-            trendingResult = Result.failure(RuntimeException("charts down"))
-        )
-        val h = buildHarness(repo)
-        dispatcher.scheduler.advanceUntilIdle()
-        for (region in ChartRegion.DISPLAY_ORDER) {
-            assertEquals("charts down", h.vm.state.value.trendingByRegion[region]?.error)
-        }
-        assertEquals(ChartRegion.DISPLAY_ORDER.size, h.repo.trendingCalls)
-
-        // 模擬後端恢復：換成成功結果後重試
-        repo.trendingResult = Result.success(listOf(v1, v2))
-        h.vm.onIntent(SearchIntent.TrendingRetry)
-        dispatcher.scheduler.advanceUntilIdle()
-
-        for (region in ChartRegion.DISPLAY_ORDER) {
-            assertEquals(listOf(v1, v2), h.vm.state.value.trendingByRegion[region]?.items)
-            assertNull(h.vm.state.value.trendingByRegion[region]?.error)
-        }
-        assertEquals(ChartRegion.DISPLAY_ORDER.size * 2, h.repo.trendingCalls)
-    }
-
-    @Test
-    fun `熱門榜單與搜尋狀態互不干擾`() {
-        // 搜尋成功不影響已載入的 trending
-        val repo = FakeVideoRepository(
-            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A")),
-            trendingResult = Result.success(listOf(v2, v3))
-        )
-        val h = buildHarness(repo)
-        dispatcher.scheduler.advanceUntilIdle()
-        for (region in ChartRegion.DISPLAY_ORDER) {
-            assertEquals(listOf(v2, v3), h.vm.state.value.trendingByRegion[region]?.items)
-        }
+    fun `重複搜尋同 query 只存一筆且置頂`() {
+        val historyRepo = FakeSearchHistoryRepository()
+        val h = buildHarness(historyRepo = historyRepo)
 
         h.doSearch("晴天")
-        assertEquals(listOf(v1), h.vm.state.value.results)
-        assertTrue(h.vm.state.value.searched)
-        for (region in ChartRegion.DISPLAY_ORDER) {
-            assertEquals(listOf(v2, v3), h.vm.state.value.trendingByRegion[region]?.items)
-            assertNull(h.vm.state.value.trendingByRegion[region]?.error)
-        }
-
-        // 搜尋失敗也不影響已載入的 trending
-        val repo2 = FakeVideoRepository(
-            firstPageResult = Result.failure(RuntimeException("boom")),
-            trendingResult = Result.success(listOf(v2, v3))
-        )
-        val h2 = buildHarness(repo2)
+        h.doSearch("夜曲")
+        h.doSearch("晴天") // 重複
         dispatcher.scheduler.advanceUntilIdle()
-        h2.doSearch("晴天")
-        assertEquals("boom", h2.vm.state.value.error)
-        for (region in ChartRegion.DISPLAY_ORDER) {
-            assertEquals(listOf(v2, v3), h2.vm.state.value.trendingByRegion[region]?.items)
-            assertNull(h2.vm.state.value.trendingByRegion[region]?.error)
-        }
+
+        // 去重置頂：晴天在最前，夜曲在後
+        assertEquals(listOf("晴天", "夜曲"), h.vm.state.value.history)
+        // add 被呼叫 3 次
+        assertEquals(3, h.historyRepo.addCalls)
     }
 
-    // ---------- 搜尋建議（autocomplete）流程 ----------
+    @Test
+    fun `ClearHistory 清空 repo 且 state history 為空`() {
+        val historyRepo = FakeSearchHistoryRepository()
+        historyRepo.seedHistory(listOf("晴天", "夜曲"))
+        val h = buildHarness(historyRepo = historyRepo)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(listOf("晴天", "夜曲"), h.vm.state.value.history)
+
+        h.vm.onIntent(SearchIntent.ClearHistory)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(1, h.historyRepo.clearCalls)
+        assertTrue(h.vm.state.value.history.isEmpty())
+    }
+
+    @Test
+    fun `空白 query 的 Search 不記錄歷史`() {
+        val historyRepo = FakeSearchHistoryRepository()
+        val h = buildHarness(historyRepo = historyRepo)
+        h.vm.onIntent(SearchIntent.QueryChanged("   "))
+        h.vm.onIntent(SearchIntent.Search)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        // 空白 query 被忽略（doSearch 內部 guard），不呼叫 add
+        assertEquals(0, h.historyRepo.addCalls)
+        assertTrue(h.historyRepo.addedQueries.isEmpty())
+    }
+
+    // ==================== 搜尋建議（autocomplete）流程 ====================
 
     @Test
     fun `輸入非空白查詢會 debounce 後抓取建議寫入 state`() {
@@ -469,7 +455,7 @@ class SearchViewModelTest {
             )
         )
         val h = buildHarness(FakeVideoRepository(), suggestionRepo)
-        dispatcher.scheduler.advanceUntilIdle() // 消化 init 的熱門榜單與建議收集 coroutine
+        dispatcher.scheduler.advanceUntilIdle() // 消化 init 的建議收集 coroutine
 
         // 快速連續輸入：只應觸發一次（最後一筆「周杰」經 debounce 後抓取）
         h.vm.onIntent(SearchIntent.QueryChanged("周"))
