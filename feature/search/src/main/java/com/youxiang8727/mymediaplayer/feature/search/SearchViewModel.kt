@@ -9,16 +9,21 @@ import com.youxiang8727.mymediaplayer.core.domain.usecase.AddToPlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.FetchTrendingSongsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchSuggestionsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchVideosUseCase
 import android.util.Log
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
@@ -41,6 +46,8 @@ data class SearchUiState(
     val isLoadingMore: Boolean = false,
     val error: String? = null,
     val searched: Boolean = false,
+    // 搜尋建議（autocomplete）：輸入過程 debounce 後載入，空白/清除/搜尋後清空
+    val suggestions: List<String> = emptyList(),
     // 熱門音樂榜單（空狀態區塊）：init 自動載入各區域榜單，僅在 searched == false 時顯示
     val trendingByRegion: Map<ChartRegion, TrendingState> = emptyMap()
 )
@@ -48,6 +55,7 @@ data class SearchUiState(
 sealed interface SearchIntent {
     data class QueryChanged(val value: String) : SearchIntent
     data object Search : SearchIntent
+    data class SelectSuggestion(val value: String) : SearchIntent
     data object LoadMore : SearchIntent
     data class AddToPlaylist(val video: VideoResult, val playlistId: Long) : SearchIntent
     data object TrendingRetry : SearchIntent
@@ -59,8 +67,17 @@ class SearchViewModel @Inject constructor(
     private val addToPlaylist: AddToPlaylistUseCase,
     private val createPlaylist: CreatePlaylistUseCase,
     observePlaylists: ObservePlaylistsUseCase,
-    private val fetchTrendingSongs: FetchTrendingSongsUseCase
+    private val fetchTrendingSongs: FetchTrendingSongsUseCase,
+    private val searchSuggestions: SearchSuggestionsUseCase
 ) : ViewModel() {
+
+    companion object {
+        /** 觸發建議查詢的 Input debounce 毫秒數（避免每鍵打網）。 */
+        const val SUGGESTION_DEBOUNCE_MS = 300L
+    }
+
+    /** 內部資料：debounce 後的建議查詢（文字與事件紀元，用於無效化已過期的結果）。 */
+    private data class SuggestionQuery(val text: String, val epoch: Long)
 
     private val _state = MutableStateFlow(SearchUiState())
     val state: StateFlow<SearchUiState> = _state.asStateFlow()
@@ -71,11 +88,48 @@ class SearchViewModel @Inject constructor(
     private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
     val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
 
+    // 輸入過程的 debounce 來源；DROP_OLDEST：連續快速輸入時只保留最新一筆基準。
+    // 每筆事件帶有 epoch：當使用者執行明確搜尋或清除時 epoch++，使仍處於 debounce 管道
+    // 中的前一輪結果在取得網路回應後發現 epoch 不符而被拋棄，不覆蓋搜尋/清除後的狀態。
+    private var suggestionEpoch: Long = 0L
+
+    private val _suggestionQuery = MutableSharedFlow<SuggestionQuery>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+
     init {
         observePlaylists()
             .onEach { list -> _playlists.value = list }
             .launchIn(viewModelScope)
         fetchTrending()
+        collectSuggestions()
+    }
+
+    /**
+     * debounce 輸入後抓取搜尋建議。`collectLatest` 使前一個未完成的抓取
+     * （慢網回應）在下一筆輸入到來時被取消，避免過時回應覆蓋新狀態。
+     * [SuggestionQuery.epoch] 讓搜尋/清除後的遲到結果自動作廢。
+     *
+     * 空/過短查詢由 [SearchSuggestionsUseCase] 內部防禦回空清單（不觸網）；
+     * Repository 失敗回空清單（不丟例外），故 UI 不需額外兜底即可優雅降級。
+     */
+    @OptIn(FlowPreview::class)
+    private fun collectSuggestions() {
+        viewModelScope.launch {
+            _suggestionQuery
+                .debounce(SUGGESTION_DEBOUNCE_MS)
+                .collectLatest { item ->
+                    val result = searchSuggestions(item.text)
+                    // 僅在「事件紀元仍為最新（期間未發生搜尋/清除）且查詢相符」時套用，
+                    // 避免搜尋後的遲到回應重新覆蓋建議清單（reset suggestions = 空）。
+                    if (item.epoch == suggestionEpoch &&
+                        _state.value.query.trim() == item.text
+                    ) {
+                        _state.update { it.copy(suggestions = result) }
+                    }
+                }
+        }
     }
 
     fun onIntent(intent: SearchIntent) {
@@ -83,8 +137,10 @@ class SearchViewModel @Inject constructor(
             is SearchIntent.QueryChanged -> {
                 _state.update { it.copy(query = intent.value) }
                 // 空白查詢：重置搜尋狀態回推薦頁（熱門榜單），提供「清除搜尋 / 返回」路徑。
-                // 不觸碰 trendingByRegion（既有快取，返回時直接顯示）。
+                // 不觸碰 trendingByRegion（既有快取，返回時直接顯示）；同時隱藏建議並無效化
+                // debounce 管道中的前一輪事件（suggestionEpoch++）。
                 if (intent.value.isBlank()) {
+                    suggestionEpoch++
                     _state.update {
                         it.copy(
                             searched = false,
@@ -92,12 +148,27 @@ class SearchViewModel @Inject constructor(
                             nextPageToken = null,
                             isLoading = false,
                             isLoadingMore = false,
-                            error = null
+                            error = null,
+                            suggestions = emptyList()
                         )
                     }
+                } else {
+                    // 非空白：進 debounce 鏈抓建議（epoch 維持，debounce 到期時匹配）
+                    _suggestionQuery.tryEmit(SuggestionQuery(intent.value.trim(), suggestionEpoch))
                 }
             }
-            SearchIntent.Search -> doSearch()
+            SearchIntent.Search -> {
+                // 執行明確搜尋：隱藏建議並無效化 debounce 管道中仍在等待的前一輪事件
+                suggestionEpoch++
+                _state.update { it.copy(suggestions = emptyList()) }
+                doSearch()
+            }
+            // 點擊建議：填回搜尋框並直接觸發搜尋；同 Search 清空建議並無效化管道
+            is SearchIntent.SelectSuggestion -> {
+                suggestionEpoch++
+                _state.update { it.copy(query = intent.value, suggestions = emptyList()) }
+                doSearch()
+            }
             SearchIntent.LoadMore -> loadMore()
             is SearchIntent.AddToPlaylist -> addVideoToPlaylist(
                 intent.video.toPlaylistItem(intent.playlistId),

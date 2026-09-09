@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -33,6 +34,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -114,6 +116,14 @@ fun SearchScreen(
                 },
                 modifier = Modifier.fillMaxWidth()
             )
+            // 搜尋建議（autocomplete）：輸入過程 debounce 載入，非空時顯示在搜尋框下方。
+            if (state.suggestions.isNotEmpty()) {
+                SuggestionList(
+                    suggestions = state.suggestions,
+                    onSelect = { onIntent(SearchIntent.SelectSuggestion(it)) }
+                )
+                Spacer(Modifier.height(8.dp))
+            }
             Spacer(Modifier.height(8.dp))
             Button(
                 onClick = { onIntent(SearchIntent.Search) },
@@ -247,6 +257,49 @@ fun SearchScreen(
 
 /** 熱門榜單 rail 顯示筆數上限（詳情完整清單不截斷）。 */
 private const val TRENDING_RAIL_LIMIT = 10
+
+/**
+ * 搜尋建議下拉清單（autocomplete）。唯讀呈現 [suggestions]，點擊任一項以 [onSelect] 回報
+ * （由 ViewModel 填回搜尋框並觸發搜尋）。
+ */
+@Composable
+private fun SuggestionList(
+    suggestions: List<String>,
+    onSelect: (String) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        tonalElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surfaceContainer
+    ) {
+        Column {
+            suggestions.forEach { suggestion ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelect(suggestion) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.Search,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = suggestion,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
 
 /** 各區域榜單的顯示標題。 */
 private fun ChartRegion.displayTitle(): String = when (this) {
@@ -708,6 +761,46 @@ private fun SearchScreenEmptyPreview() {
     MyMediaPlayerTheme {
         SearchScreen(
             state = SearchUiState(),
+            playlists = emptyList(),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {},
+            onPlayVideo = {},
+            onCreatePlaylistAndAdd = { _, _ -> }
+        )
+    }
+}
+
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Suggestions - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Suggestions - Light"
+)
+@Composable
+private fun SearchScreenSuggestionsPreview() {
+    MyMediaPlayerTheme {
+        SearchScreen(
+            state = SearchUiState(
+                query = "周杰",
+                suggestions = listOf(
+                    "周杰倫",
+                    "周杰倫 晴天",
+                    "周杰倫 最新歌曲",
+                    "周杰倫 演唱會"
+                )
+            ),
             playlists = emptyList(),
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
