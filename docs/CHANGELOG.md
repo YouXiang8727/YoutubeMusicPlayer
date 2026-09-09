@@ -9,6 +9,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- `DiscoverViewModelTest.observePlaylists` 測試對 `Playlist` 的時脈預設時間戳（`createdAt`/`updatedAt`）於斷言處**重建比較**造成 flaky（初始值與斷言各 new 一次，跨毫秒即產生不同 timestamp → 同毫秒偶過、跨毫秒必掛；CI 全新執行 289 tasks 時現形）：改為 initial 與斷言共用同一 instance
+
 ### Added
 - 熱門榜單遷移至獨立**探索頁**（`feature:discover` 新模組）：trending UI 與狀態（`DiscoverScreen`/`DiscoverViewModel`、`TrendingState`、`fetchTrending()` per-region 邏輯、`TrendingRetry`）自 `feature:search` 完整遷出；搜尋頁專注搜尋＋紀錄。`MainActivity` 底部導覽列由 2 tab 改為 **3 tab（搜尋／探索／播放清單）**，`Routes.DISCOVER` 串接 `DiscoverRoute(onPlayChartQueue)` → `PlaybackIntent.PlayList`（暫時性佇列起播方式不變）；探索 tab 以 `Icons.Filled.Star` 圖示（core icons 集內無 Explore 圖示，未引入 extended icons 依賴）。新增 `DiscoverViewModelTest`（11 案例：init 依 DISPLAY_ORDER 載入、per-region 失敗隔離、retry 防重入、playlist 流程）與 4 組 `DiscoverScreen` Preview（deep/light）。`SearchViewModel`/`SearchScreen` 移除全部 trending 程式碼（`trendingByRegion`/`TrendingState`/`TrendingRetry`/trending composables/trending previews 與 `SearchRoute(onPlayChartQueue)` 參數）
 - 搜尋頁**最近搜尋** UI（資料鏈見下一條目）：`SearchUiState` 新增 `history: List<String>`（`ObserveSearchHistoryUseCase` 觀察，最新在前）；空狀態（`searched == false`）顯示「最近搜尋」區塊——點擊紀錄＝填回搜尋框並直接搜尋（等同 `SelectSuggestion`，同時更新時間戳置頂）、「清除全部」→ `SearchIntent.ClearHistory`、無紀錄時顯示「輸入關鍵字開始搜尋」提示；`Search`／`SelectSuggestion` 提交時以 `AddSearchHistoryUseCase` 記錄。`BackHandler` 清除搜尋後回到空狀態（最近搜尋）。新增 7 個 ViewModel 歷史測試案例（init 觀察／外部推送同步／Search 記錄／SelectSuggestion 記錄／重複去重置頂／ClearHistory 清空／空白不記錄）與 `SearchScreen - History` Compose Preview（deep/light）
