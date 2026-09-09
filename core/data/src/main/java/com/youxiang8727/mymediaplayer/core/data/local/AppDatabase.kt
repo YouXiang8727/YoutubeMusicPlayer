@@ -6,11 +6,13 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [PlaylistEntity::class, PlaylistItemEntity::class],
-    version = 3,
+    entities = [PlaylistEntity::class, PlaylistItemEntity::class, SearchHistoryEntity::class],
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun playlistDao(): PlaylistDao
+
+    abstract fun searchHistoryDao(): SearchHistoryDao
 }
