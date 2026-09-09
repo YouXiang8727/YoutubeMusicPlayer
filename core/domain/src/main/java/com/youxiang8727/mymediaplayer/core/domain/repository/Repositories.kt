@@ -34,3 +34,27 @@ interface PlaylistRepository {
     suspend fun clearPlaylist(playlistId: Long)
     suspend fun getRandomItem(playlistId: Long): PlaylistItem?
 }
+
+/**
+ * 搜尋紀錄（本機儲存，最新在前，去重置頂，最多保留 10 筆）。
+ *
+ * 實作位於 core:data（Room），UI 僅依賴此介面，不洩漏任何資料層型別。
+ */
+interface SearchHistoryRepository {
+
+    /**
+     * 記錄一次搜尋。
+     *
+     * 實作端會先 trim，trim 後為空白的 query 直接忽略（不寫入）；重複 query
+     * 以更新時間戳方式置頂；超出上限時淘汰最舊一筆。
+     *
+     * @param query 使用者執行的搜尋字串（可含前後空白，實作端會處理）
+     */
+    suspend fun add(query: String)
+
+    /** 觀察全部搜尋紀錄（最新在前，最多 10 筆）。 */
+    fun observeAll(): Flow<List<String>>
+
+    /** 清除全部搜尋紀錄。 */
+    suspend fun clear()
+}

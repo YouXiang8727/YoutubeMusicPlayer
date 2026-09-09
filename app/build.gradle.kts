@@ -45,6 +45,7 @@ dependencies {
     implementation(project(":core:domain"))
     implementation(project(":core:data"))
     implementation(project(":feature:search"))
+    implementation(project(":feature:discover"))
     implementation(project(":feature:playlist"))
     implementation(project(":feature:player"))
 

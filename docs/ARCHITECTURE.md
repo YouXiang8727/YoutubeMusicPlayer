@@ -9,7 +9,8 @@
 
 ```
 :app                 # 容器：Application、MainActivity、Navigation 圖、Manifest 聚合
-├─ feature:search    # 搜尋頁（Screen + ViewModel）→ 依賴 feature:playlist（PlaylistPickerSheet）
+├─ feature:search    # 搜尋頁（Screen + ViewModel + 搜尋紀錄 UI）→ 依賴 feature:playlist（PlaylistPickerSheet）
+├─ feature:discover  # 探索頁（熱門音樂榜單，Screen + ViewModel；2026-09 由 search 遷出獨立）→ 依賴 feature:playlist
 ├─ feature:playlist  # 播放清單（列表頁 + 詳情頁 + 共用 BottomSheet/Dialog）
 ├─ feature:player    # 無全螢幕播放頁；提供播放佇列/控制器（PlayerViewModel + PlaybackIntent）、MiniPlayerBar、MusicService（前景服務、背景音訊）→ 依賴 feature:playlist
 ├─ core:ui           # Material Theme、共用樣式（未來放共用 Composable）
@@ -21,7 +22,8 @@
 ## 2. 依賴規則（單向，物理強制）
 
 ```
-:app ──▶ :feature:search ──▶ :feature:playlist
+:app ──▶ :feature:search  ──▶ :feature:playlist
+    └──▶ :feature:discover ──▶ :feature:playlist
     └──▶ :feature:player  ──▶ :feature:playlist     :feature:* ──▶ :core:ui
     └──▶ :feature:playlist                          :feature:* ──▶ :core:domain
                                                      :core:data  ──▶ :core:common
@@ -46,12 +48,14 @@
 - `core.domain.repository.VideoRepository` / `PlaylistRepository`：interface（`VideoRepository.search(query, continuationToken: String? = null): Result<VideoSearchPage>`）
 - `core.domain.repository.AudioStreamRepository`：音訊串流解析領域埠（interface）：`resolveAudioUrl(videoId: String, force: Boolean = false): Result<String>`。`force=true` 表示跳過 TTL 快取強制重解析（用於 content URL 403 過期後重試同曲）；快取細節封在 core:data，此介面只暴露語意
 - `core.domain.repository.SearchSuggestionRepository`：搜尋建議領域埠（interface）：`suggestions(query: String): List<String>`（回建議字串清單；空白/過短回空、不丟例外，錯誤封在實作）
-- `core.domain.usecase.*`：SearchVideos（支援續頁 token 透傳）、FetchTrendingSongs（熱門音樂榜單，`region` 參數）、SearchSuggestions（autocomplete；trim＋`MIN_QUERY_LENGTH=1` 防禦，過短不觸網）、CreatePlaylist、RenamePlaylist、DeletePlaylist、ObservePlaylists、ObservePlaylistItems、AddToPlaylist、RemoveFromPlaylist、ClearPlaylist、ShufflePlayPlaylist
+- `core.domain.repository.SearchHistoryRepository`：搜尋紀錄領域埠（interface）：`add(query)` 記錄一次搜尋（實作端 trim、空白忽略、重複 query 更新時間戳置頂、上限 10 筆汰最舊）、`observeAll(): Flow<List<String>>`（最新在前）、`clear()`。介面 doc 註明防禦由實作層負責
+- `core.domain.usecase.*`：SearchVideos（支援續頁 token 透傳）、FetchTrendingSongs（熱門音樂榜單，`region` 參數）、SearchSuggestions（autocomplete；trim＋`MIN_QUERY_LENGTH=1` 防禦，過短不觸網）、CreatePlaylist、RenamePlaylist、DeletePlaylist、ObservePlaylists、ObservePlaylistItems、AddToPlaylist、RemoveFromPlaylist、ClearPlaylist、ShufflePlayPlaylist、AddSearchHistory（薄轉發 repo.add，防禦在實作層）、ObserveSearchHistory（透傳 Flow）、ClearSearchHistory（呼叫 repo.clear）
 - 測試：`src/test/` 純 JVM 單元測試（Fake Repository）
 
 ### core:data
-- `local.PlaylistEntity` / `PlaylistItemEntity`：Room Entity（持久化細節，不外洩）；與 Domain Model 互轉的 mapper 在同檔（`PlaylistItemEntity` 含 `duration` 可空 TEXT 欄位，DB version 3，`MIGRATION_2_3` = `ALTER TABLE playlist_items ADD COLUMN duration TEXT`）
-- `local.AppDatabase` / `PlaylistDao`：Room（`PlaylistDao` 含播放清單 CRUD、項目觀察、隨機取曲、級聯刪除）
+- `local.PlaylistEntity` / `PlaylistItemEntity`：Room Entity（持久化細節，不外洩）；與 Domain Model 互轉的 mapper 在同檔（`PlaylistItemEntity` 含 `duration` 可空 TEXT 欄位，DB version 4，`MIGRATION_2_3` = `ALTER TABLE playlist_items ADD COLUMN duration TEXT`）
+- `local.SearchHistoryEntity` / `SearchHistoryDao`：搜尋紀錄表（`search_history`，query PK + searchedAt）；DAO 提供 `upsert`（REPLACE 達成去重置頂）、`observeAll`（`ORDER BY searchedAt DESC LIMIT 10` 最新在前）、`trimToLimit`（刪除超出上限的舊列，與 repo 的 `MAX_HISTORY_SIZE=10` 同步）、`clear`；`MIGRATION_3_4` = `CREATE TABLE IF NOT EXISTS search_history (...)`，**不清空既有播放清單資料**
+- `local.AppDatabase` / `PlaylistDao`：Room（DB version 4；`PlaylistDao` 含播放清單 CRUD、項目觀察、隨機取曲、級聯刪除；`searchHistoryDao()` 提供搜尋紀錄存取）
 - `remote.YoutubeSearchApi`：Retrofit（行動版搜尋頁）；`searchHtml(query)` 初次以 GET `results` 抓取；`searchContinuation(clientName, clientVersion, body)` 續頁以 innerTube `POST youtubei/v1/search` 抓取 append-only chunk（baseUrl `https://m.youtube.com/`）
 - `remote.YoutubeDataSource`：解析 `ytInitialData` → `VideoSearchPage`。初次搜尋解析 `videoRenderer`（[parseYtInitialData]）；續頁（innerTube POST）解析 `videoWithContextRenderer`（[parseContinuationChunk]，欄位對應不同：videoId 於 `watchEndpoint`、title 於 `headline`）。**duration 解析**：`toVideoResult()` 取 `lengthText.simpleText`（fallback `thumbnailOverlayTimeStatusRenderer.text.simpleText`），`toContinuationVideoResult()` 優先 `thumbnailOverlayTimeStatusRenderer`（fallback lengthText）；共用 `JsonObject.lengthText()`＋`normalizeDuration()`（處理 `\u202F`/`\u00A0`，空白→null）。token 擷取（`continuationItemRenderer.continuationEndpoint.continuationCommand.token`，優先 `CONTINUATION_REQUEST_TYPE_SEARCH`）與解析函式皆 internal 純函數（`extractYtInitialData` / `parseYtInitialData` / `parseContinuationChunk` / `collectVideoRenderers` / `collectContinuationVideoRenderers` / `extractContinuationToken`）供 JVM 測試；每頁輸出 `SearchPaging` log（SUMMARY/DETAIL 全量 videoId:title/WARN token 未推進）
 - `remote.TrendingPlaylistDataSource`：熱門音樂榜單（**支援多區域**：台灣／西洋／日本／韓國，各對應 YouTube Music Global Charts 官方頻道 100 首 playlist；`playlistId` 由 `ChartRegion` 提供，例 TAIWAN =「台灣百大熱門音樂影片」）。不走 Retrofit，直接注入 `stream.StreamHttpTransport`（串流鏈現有抽象）POST innerTube browse（baseUrl `https://www.youtube.com/youtubei/v1/browse`，**不需新增 Retrofit**，clean client 身份由 body + headers 自帶）。client 用 **ANDROID_VR**（免 poToken，與串流鏈同家族，版本易腐一起監控；依 A 實證規格其 UA/headers/context 直接 hardcode 於本資料源，**不共享** `InnerTubeClientProfiles`，避免跨檔變更風險），首頁 body 帶 `browseId="VL" + ChartRegion.playlistId`（例 TW：`VLPL4fGSI1pDJn4eKyK8APGwl0S0wgyHvQyU`）；**分頁聚合至整份**（約 100 首）：抓頁 → 全樹收 `playlistVideoRenderer`（videoId / title.runs[0] / shortBylineText.runs[0] / 首張縮圖）→ 累加去重 → 續頁 token 取 `playlistVideoListRenderer.continuations[0].nextContinuationData.continuation`（**非** continuationItemRenderer）。**duration 解析**：`toPlaylistVideoResult()` 取 `lengthText.simpleText`（fallback `thumbnailOverlayTimeStatusRenderer.text.simpleText`），套 `normalizeDuration()` 正規化。內部純函數 `parsePlaylistPage` / `collectPlaylistVideos` / `extractPlaylistContinuationToken` 供 JVM 測試；分頁上限 `MAX_PAGES=6` 防壞回應無限迴圈。HTTP 非 200 / 非合法 JSON / 重複 token → `Result.failure`（前端可顯示）。舊 charts 鏈（`ChartsApi`/`ChartsDataSource`、`WEB_MUSIC_ANALYTICS`＋`FEmusic_analytics_charts_home`）已於 2026-09 被汰除（恆 400、無 TW），已刪除
@@ -68,16 +72,17 @@
   - `@StreamProfile`：乾淨 client（僅逾時設定、無任何攔截器），串流解析鏈專用——NewPipe extractor 的 `remote.OkHttpDownloader`、InnerTube/Piped 的 `stream.OkHttpStreamHttpTransport` 都掛本 profile（熱門榜單走同抽象 `StreamHttpTransport`，不需 Retrofit）
   - `@SuggestionsProfile`：乾淨 client（connect/read 皆 5s 短逾時），搜尋建議端點（Google suggestqueries）專用——不需瀏覽器 header，避免與乾淨 client 混用
   - 教訓：瀏覽器 header 一旦覆蓋 InnerTube client 身份 UA 或 extractor 自帶 UA，串流解析即遭 LOGIN_REQUIRED，故兩 profile 嚴禁混用
-- `repository.*Impl`：實作 domain interface（Entity ↔ Domain mapping）；`SearchSuggestionRepositoryImpl` 委派 `SearchSuggestionDataSource`（trim＋空白防禦，不觸網）
-- `di.DataModule`：Database / Dispatcher / Repository 三組綁定（含 `SearchSuggestionRepository`、`SearchSuggestionDataSource` 的 @Binds）
+- `repository.*Impl`：實作 domain interface（Entity ↔ Domain mapping）；`SearchSuggestionRepositoryImpl` 委派 `SearchSuggestionDataSource`（trim＋空白防禦，不觸網）；`SearchHistoryRepositoryImpl` 委派 `SearchHistoryDao`（add：trim＋空白忽略＋REPLACE upsert＋trimToLimit 上限汰除；observeAll：Entity → query 字串 list，最新在前）
+- `di.DataModule`：Database / Dispatcher / Repository 三組綁定（含 `SearchSuggestionRepository`、`SearchSuggestionDataSource`、`SearchHistoryRepository` 的 @Binds；`DatabaseModule` 註冊 `MIGRATION_2_3`＋`MIGRATION_3_4` 並提供 `SearchHistoryDao`）
 
 ### core:ui
 - `core.ui.theme.MyMediaPlayerTheme` / Color / Type
 - `core.ui.component.DurationBadge`：影片時長 badge（疊於縮圖右下角，YouTube 慣例；`duration` 為 null/空白時不顯示）——共用元件第二使用點條款而升級（feature:search 搜尋結果／熱門榜單、feature:playlist 歌單詳情共用，見 §5 慣例）
 
-### feature:search | playlist | player
+### feature:search | discover | playlist | player
 - `*Route`（Hilt 容器）→ `*Screen`（無狀態 Composable）＋ `*ViewModel`（StateFlow + Intent）
-- `feature.search` 熱門音樂榜單（T4）：搜尋空狀態（`searched == false`）顯示**各區域熱門音樂區塊**——台灣／西洋／日本／韓國（依 `ChartRegion.DISPLAY_ORDER` 順序），每區 rail（前 10 筆，縮圖＋歌名＋歌手，**不顯示名次**）＋「查看完整榜單」切換完整清單（兩態皆在 module 內以 state 切換，**不新增 nav route**；`fullChartRegion: ChartRegion?` 為展開狀態，非 null 時僅顯示該區完整清單，null 時四區 rail 以垂直 LazyColumn 並排，無巢狀 LazyColumn）。`SearchViewModel` 注入 `FetchTrendingSongsUseCase`，init 依 `ChartRegion.DISPLAY_ORDER` 自動載入**各區域**榜單，狀態為 `trendingByRegion: Map<ChartRegion, TrendingState>`（`TrendingState(items/loading/error)`；各區域獨立載入，單一區域失敗僅寫入該區域 `error`，不影響其他區域與搜尋）；`SearchIntent.TrendingRetry` 內嵌重試（各區域自己的 `loading` 旗標即重入 guard，重抓非載入中區域），**不擋搜尋**。點任一歌曲以**整份榜單**為暫時性佇列從該曲起播，經 `SearchRoute(onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit)`（帶預設 no-op，feature:search 不得依賴 feature:player，故型別只用 core:domain `PlayQueueItem`，由 app 容器層接線至 `PlaybackIntent.PlayList`）。**搜尋後可返回推薦**：`QueryChanged` 收到空白值即重置搜尋狀態（`searched=false`、清空 results/token/error），搜尋框空白時顯示「✕」清除鈕、已搜尋時系統返回鍵被 `BackHandler(enabled=searched)` 攔截為清除搜尋（`searched=false` 時維持系統預設退出）；`trendingByRegion` 快取不因搜尋/清除而遺失。**搜尋建議（autocomplete）**：`SearchViewModel` 注入 `SearchSuggestionsUseCase`，輸入非空白查詢經 `SearchIntent.QueryChanged` 送 `MutableSharedFlow` → `debounce(300ms)`（`SUGGESTION_DEBOUNCE_MS`）＋`collectLatest` 抓建議，寫入 `SearchUiState.suggestions: List<String>`；「epoch 無效化」機制（搜尋/清除/點建議時 `suggestionEpoch++`）使 debounce 管道中仍在等的遲到回應自動作廢，不覆蓋搜尋後狀態。`SearchScreen` 於搜尋框下方以 `SuggestionList`（Surface）顯示建議（非空時），點建議（`SearchIntent.SelectSuggestion`）填回搜尋框並直接觸發搜尋、隱藏建議；明確「搜尋」按鈕與空白清除同為隱藏建議。空/過短查詢與失敗由 UseCase/Repository 防禦回空清單（不觸網、不崩潰）。**熱門榜單可加入播放清單**：`ChartRailItem` 縮圖右下角「＋」（獨立可點擊 24dp 區塊，不觸發整卡播放）、`ChartDetailRow` 行尾 `IconButton(Add)`，與搜尋結果共用 `showPickerVideo`→`PlaylistPickerSheet` 流程。所有縮圖預覽（搜尋結果 VideoCard／熱門 rail／完整榜單）疊 `core:ui DurationBadge` 顯示影片時長
+- `feature.search` 搜尋頁（Screen + ViewModel）：搜尋框＋「搜尋」按鈕＋搜尋結果（`VideoCard`＋`LoadMoreFooter`，append 去重＋token 未推進視為到底防禦）。**搜尋建議（autocomplete）**：`SearchViewModel` 注入 `SearchSuggestionsUseCase`，輸入非空白查詢經 `SearchIntent.QueryChanged` 送 `MutableSharedFlow` → `debounce(300ms)`（`SUGGESTION_DEBOUNCE_MS`）＋`collectLatest` 抓建議，寫入 `SearchUiState.suggestions: List<String>`；「epoch 無效化」機制（搜尋/清除/點建議時 `suggestionEpoch++`）使 debounce 管道中仍在等的遲到回應自動作廢，不覆蓋搜尋後狀態。`SearchScreen` 於搜尋框下方以 `SuggestionList`（Surface）顯示建議（非空時），點建議（`SearchIntent.SelectSuggestion`）填回搜尋框並直接觸發搜尋、隱藏建議；明確「搜尋」按鈕與空白清除同為隱藏建議。空/過短查詢與失敗由 UseCase/Repository 防禦回空清單（不觸網、不崩潰）。**搜尋紀錄（recent searches，2026-09）**：空狀態（`searched == false`）顯示「最近搜尋」區塊——`SearchUiState.history: List<String>` 由 `ObserveSearchHistoryUseCase` 觀察 Room `search_history` 表（最新在前、最多 10 筆，trim／空白忽略／去重置頂／上限汰除由 core:data `SearchHistoryRepositoryImpl` 負責）；點擊任一紀錄＝填回搜尋框並直接搜尋（行為等同 `SelectSuggestion`，同時更新時間戳置頂）；「清除全部」`TextButton` → `SearchIntent.ClearHistory`；`Search`／`SelectSuggestion` 提交時以 `AddSearchHistoryUseCase` 記錄（空白由 repository 擋）。無紀錄時顯示「輸入關鍵字開始搜尋」提示。**清除搜尋回空狀態**：搜尋框空白時顯示「✕」清除鈕、已搜尋時系統返回鍵被 `BackHandler(enabled=searched)` 攔截為清除搜尋（回到空狀態顯示最近搜尋）；`searched=false` 時維持系統預設退出。**加入播放清單**：結果卡片「＋」→ `showPickerVideo`→`PlaylistPickerSheet`（共用 feature:playlist）。所有縮圖疊 `core:ui DurationBadge` 顯示影片時長
+- `feature.discover` 探索頁＝熱門音樂榜單（2026-09 由 feature:search 遷出獨立成頁，搜尋頁專注搜尋＋紀錄）：四區域（台灣／西洋／日本／韓國，依 `ChartRegion.DISPLAY_ORDER`）rail（前 `TRENDING_RAIL_LIMIT=10` 筆，縮圖＋歌名＋歌手，不顯示名次）＋「查看完整榜單」切換完整清單（module 內 state `fullChartRegion: ChartRegion?` 切換，**不新增 nav route**；非 null 僅顯示該區完整清單，null 時四區 rail 以垂直 LazyColumn 並排，無巢狀）。`DiscoverViewModel` 注入 `FetchTrendingSongsUseCase`，init 依 `DISPLAY_ORDER` 自動載入各區域，狀態 `trendingByRegion: Map<ChartRegion, TrendingState>`（`TrendingState(items/loading/error)`，各區域獨立載入、單一區域失敗僅寫入該區域 `error` 不影響其他）；`DiscoverIntent.TrendingRetry` 內嵌重試（各區域 `loading` 旗標即重入 guard）。點任一歌曲以**整份榜單**為暫時性佇列起播，經 `DiscoverRoute(onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit)`（型別只用 core:domain `PlayQueueItem`，由 app 容器層接線至 `PlaybackIntent.PlayList`，feature:discover 不依賴 feature:player）。「＋」加入播放清單（`ChartRailItem` 縮圖右下角獨立 24dp 區塊不觸發整卡播放、`ChartDetailRow` 行尾 `IconButton(Add)`）共用 `PlaylistPickerSheet` 流程。縮圖（rail／完整榜單）疊 `core:ui DurationBadge`
 - `feature.player.PlayerViewModel.PlaybackIntent.PlayList(entries, startIndex)`：暫時性佇列播放意圖（熱門榜單等非 Room 清單），由 activity scope 的 PlayerViewModel 轉 call `PlayerController.playQueue(entries, startIndex)`（與 MusicService `ACTION_PLAY_QUEUE` 鏈路對接，見 §3 core:data 播放佇列）
 - `feature:playlist` 提供共用 `PlaylistPickerSheet`（BottomSheet）與 `CreatePlaylistDialog`，供 search/player 共用（故 search/player 依賴 playlist）
 - `feature:playlist` 歌單詳情頁（`PlaylistDetailScreen`/`PlaylistDetailCard`）：縮圖右下角疊 `core:ui DurationBadge` 顯示 `item.duration`（舊資料 null 不顯示）
@@ -92,8 +97,9 @@
   - Service 的 Manifest 宣告在 feature 模組內（manifest merging 併入 app）；POST_NOTIFICATIONS 由 app 於啟動時動態請求
 
 ### :app
-- `Routes` + NavHost；bottom bar（搜尋 / 播放清單）
+- `Routes` + NavHost；bottom bar（搜尋 / 探索 / 播放清單）——`Routes.SEARCH` 為 start destination，三個頂層目的地共用 `popUpTo(SEARCH){saveState}`＋`launchSingleTop`＋`restoreState` 的 tab 切換模式
 - 播放清單導航：`playlist_list`（列表頁）→ `playlist_detail/{playlistId}`（詳情頁，含隨機播放）
+- 播放接線：`SearchRoute(onPlayVideo)` → `PlaybackIntent.Play`；`DiscoverRoute(onPlayChartQueue)` → `PlaybackIntent.PlayList`（暫時性佇列）
 - 權限宣告、Application (`@HiltAndroidApp`)
 
 ## 4. 資料流
@@ -101,9 +107,9 @@
 ```
 UI Intent ──▶ ViewModel.onIntent ──▶ UseCase ──▶ Repository(interface)
                                                     │
-   UiState ◀── StateFlow ◀── ViewModel ◀── Flow ◀──┤
-                                                    ├─▶ Room（playlist 表）
-                                                    └─▶ Retrofit/NewPipe（YouTube）
+UiState ◀── StateFlow ◀── ViewModel ◀── Flow ◀──┤
+                                                     ├─▶ Room（playlist 表 / search_history 搜尋紀錄表）
+                                                     └─▶ Retrofit/NewPipe（YouTube）
 播放：PlayerViewModel ──▶ PlayerController(core:domain) ──▶ MediaController ──▶ MusicService(MediaSession) ──▶ ExoPlayer
       （PlayerController 介面在 core:domain，實作 MediaControllerPlayerController 在 feature:player）
       （前景 MiniPlayerBar 與背景通知共用同一 MediaSession 狀態源）

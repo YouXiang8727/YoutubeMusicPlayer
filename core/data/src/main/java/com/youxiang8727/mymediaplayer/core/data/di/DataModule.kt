@@ -9,6 +9,7 @@ import com.youxiang8727.mymediaplayer.core.common.DispatcherProvider
 import com.youxiang8727.mymediaplayer.core.data.di.StreamProfile
 import com.youxiang8727.mymediaplayer.core.data.local.AppDatabase
 import com.youxiang8727.mymediaplayer.core.data.local.PlaylistDao
+import com.youxiang8727.mymediaplayer.core.data.local.SearchHistoryDao
 import com.youxiang8727.mymediaplayer.core.data.remote.SearchSuggestionDataSource
 import com.youxiang8727.mymediaplayer.core.data.remote.YoutubeSearchSuggestionDataSource
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.AudioStreamSource
@@ -22,10 +23,12 @@ import com.youxiang8727.mymediaplayer.core.data.remote.stream.StreamErrorClassif
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.StreamHttpTransport
 import com.youxiang8727.mymediaplayer.core.data.repository.AudioStreamRepositoryImpl
 import com.youxiang8727.mymediaplayer.core.data.repository.PlaylistRepositoryImpl
+import com.youxiang8727.mymediaplayer.core.data.repository.SearchHistoryRepositoryImpl
 import com.youxiang8727.mymediaplayer.core.data.repository.SearchSuggestionRepositoryImpl
 import com.youxiang8727.mymediaplayer.core.data.repository.VideoRepositoryImpl
 import com.youxiang8727.mymediaplayer.core.domain.repository.AudioStreamRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
+import com.youxiang8727.mymediaplayer.core.domain.repository.SearchHistoryRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.SearchSuggestionRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.VideoRepository
 import dagger.Binds
@@ -48,6 +51,17 @@ object DatabaseModule {
         }
     }
 
+    /** v3 → v4：新增 search_history 表（搜尋紀錄，query PK + searchedAt）。 */
+    private val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS search_history (" +
+                    "query TEXT NOT NULL PRIMARY KEY, " +
+                    "searchedAt INTEGER NOT NULL)"
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
@@ -55,13 +69,16 @@ object DatabaseModule {
             context.applicationContext,
             AppDatabase::class.java,
             "mymediaplayer.db"
-        ).addMigrations(MIGRATION_2_3)
+        ).addMigrations(MIGRATION_2_3, MIGRATION_3_4)
             .fallbackToDestructiveMigration()  // 對不可預期版本仍是防禦
             .build()
     }
 
     @Provides
     fun providePlaylistDao(db: AppDatabase): PlaylistDao = db.playlistDao()
+
+    @Provides
+    fun provideSearchHistoryDao(db: AppDatabase): SearchHistoryDao = db.searchHistoryDao()
 }
 
 @Module
@@ -131,6 +148,12 @@ abstract class RepositoryModule {
     abstract fun bindSearchSuggestionRepository(
         impl: SearchSuggestionRepositoryImpl
     ): SearchSuggestionRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindSearchHistoryRepository(
+        impl: SearchHistoryRepositoryImpl
+    ): SearchHistoryRepository
 
     @Binds
     @Singleton

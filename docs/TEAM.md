@@ -10,7 +10,7 @@
 |------|------|----------|------|------|
 | **A - Tech Lead** | 架構守門人 | `settings.gradle.kts`、`gradle/libs.versions.toml`、根 `build.gradle.kts`、`core/common`、`core/domain`、`.github/`、`docs/`、`app/`（容器層） | B/C/D 的擁有目錄（治理例外見 §8） | 開 PR 與審查；**merge 一律由 Owner 在 GitHub 執行**（A 不代按，除非 Owner 明確指示）；版本升級統一 PR |
 | **B - Data/Media Engineer** | 資料與播放 | `core/data/`、`feature/player/src/main/java/**/service/`、`feature/player/src/main/java/**/playback/`（播放控制鏈：PlayerController、PlaybackSnapshot 等，2026-08 裁定） | `feature/*/ui`、`core/ui` | NewPipe / StreamResolver 穩定度監控 |
-| **C - UI Engineer** | 前端介面 | `core/ui/`、`feature/search/`、`feature/playlist/`、`feature/player/` 的 Screen 與 ViewModel | `data/remote`、`data/local`（只能透過 `core:domain` 的 UseCase） | — |
+| **C - UI Engineer** | 前端介面 | `core/ui/`、`feature/search/`、`feature/discover/`、`feature/playlist/`、`feature/player/` 的 Screen 與 ViewModel | `data/remote`、`data/local`（只能透過 `core:domain` 的 UseCase） | — |
 | **D - QA Engineer** | 獨立驗證 | `docs/qa/`（測試計畫、煙霧清單、報告） | **所有產品程式碼目錄**（只驗證，不開發） | 發版前回歸測試總召 |
 
 - **QA 改為常設角色 D**：獨立於開發者執行驗證——單元測試執行、實機煙霧測試、logcat crash 監控、發版回歸。開發者自測不取代 D 的獨立驗證。
@@ -121,6 +121,7 @@ app ──▶ feature:* ──▶ core:ui ──▶ (無)
 | 通知上隨機／循環按鈕圖示不隨狀態切換 | DefaultMediaNotificationProvider 的 custom layout 不支援 per-state icon；精確狀態以前景 App 內為準 |
 | 搜尋續頁走 innerTube POST（`youtubei/v1/search`，MWEB client）而非 GET `?continuation=` | 2026-08 多頁實測：GET 續頁回傳**整頁重新排序**（重疊 55~100%）→ 載入更多變輪迴；POST 回傳 append-only chunk（重疊 0%）。雖 MWEB client 屬易腐路徑，但 chunk 解析拆成純函數、失效改寫成本可控 |
 | 搜尋建議（autocomplete）首版用 Google suggestqueries 端點（`suggestqueries.google.com/complete/search?client=youtube&ds=yt`），非官方 API | 已先抽換成 `core:domain` 的 `SearchSuggestionRepository` interface（UI/ViewModel 只依賴介面），建議來源可隨時抽換；suggestqueries 低延遲、免 API key、極穩定，作為 MVP 快速落地。其建議可能偏「搜尋熱詞」而非「音樂導向」；音樂導向（如 YT Music 建議、InnerTube suggestion、或結合本地歷史/收藏權重）列為追蹤待辦（見 §6 Roadmap），抽換時只需改 core:data 的 `@Binds` 實作 |
+| 熱門榜單（Trending）獨立成「探索」Tab，不留在搜尋頁 | 搜尋、搜尋紀錄屬「導向型」任務，Trending 屬「探索型」，混在同一空狀態頁互相搶空間；拆頁後搜尋頁職責單一（搜尋＋紀錄），探索頁（`feature:discover`）有專屬空間可擴充推薦/新歌等。代價：底部導覽 2 tab → 3 tab；探索 tab 圖示暫用 core icons 的 Star（core 集無 Explore，不為單一圖示引入 extended icons 依賴） |
 
 ## 8. AI 協作運作模式（Loop Engineering）
 

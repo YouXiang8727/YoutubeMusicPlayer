@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -41,6 +42,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
+import com.youxiang8727.mymediaplayer.feature.discover.DiscoverRoute
 import com.youxiang8727.mymediaplayer.feature.player.MiniPlayerBar
 import com.youxiang8727.mymediaplayer.feature.player.PlaybackIntent
 import com.youxiang8727.mymediaplayer.feature.player.PlayerViewModel
@@ -51,6 +53,7 @@ import dagger.hilt.android.AndroidEntryPoint
 
 object Routes {
     const val SEARCH = "search"
+    const val DISCOVER = "discover"
     const val PLAYLIST_LIST = "playlist_list"
     const val PLAYLIST_DETAIL = "playlist_detail/{playlistId}?name={name}"
 
@@ -115,8 +118,9 @@ fun MyApp() {
         }
     }
 
-    // 播放清單列表頁為頂層目的地之一，顯示底部導航列
+    // 頂層目的地（搜尋／探索／播放清單）顯示底部導航列；播放清單詳情頁保留（階層 nav）
     val showBottomBar = currentRoute == Routes.SEARCH ||
+            currentRoute == Routes.DISCOVER ||
             currentRoute == Routes.PLAYLIST_LIST ||
             currentRoute?.startsWith("playlist_detail") == true
 
@@ -154,6 +158,18 @@ fun MyApp() {
                             label = { Text("搜尋") }
                         )
                         NavigationBarItem(
+                            selected = currentRoute == Routes.DISCOVER,
+                            onClick = {
+                                navController.navigate(Routes.DISCOVER) {
+                                    popUpTo(Routes.SEARCH) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            icon = { Icon(Icons.Filled.Star, contentDescription = null) },
+                            label = { Text("探索") }
+                        )
+                        NavigationBarItem(
                             selected = currentRoute == Routes.PLAYLIST_LIST ||
                                     currentRoute?.startsWith("playlist_detail") == true,
                             onClick = {
@@ -184,7 +200,11 @@ fun MyApp() {
                             playerViewModel.onPlaybackIntent(
                                 PlaybackIntent.Play(video.videoId, video.title)
                             )
-                        },
+                        }
+                    )
+                }
+                composable(Routes.DISCOVER) {
+                    DiscoverRoute(
                         // 熱門榜單：整份清單一併送入暫時性播放佇列，從點擊的歌曲起播
                         onPlayChartQueue = { entries, startIndex ->
                             playerViewModel.onPlaybackIntent(

@@ -1,14 +1,15 @@
 package com.youxiang8727.mymediaplayer.feature.search
 
-import com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.toPlaylistItem
+import com.youxiang8727.mymediaplayer.core.domain.usecase.AddSearchHistoryUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.AddToPlaylistUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.ClearSearchHistoryUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
-import com.youxiang8727.mymediaplayer.core.domain.usecase.FetchTrendingSongsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.ObserveSearchHistoryUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchSuggestionsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchVideosUseCase
 import android.util.Log
@@ -31,13 +32,6 @@ import kotlinx.coroutines.launch
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 
-/** 單一區域的熱門榜單狀態。 */
-data class TrendingState(
-    val items: List<VideoResult> = emptyList(),
-    val loading: Boolean = false,
-    val error: String? = null
-)
-
 data class SearchUiState(
     val query: String = "",
     val isLoading: Boolean = false,
@@ -48,8 +42,8 @@ data class SearchUiState(
     val searched: Boolean = false,
     // 搜尋建議（autocomplete）：輸入過程 debounce 後載入，空白/清除/搜尋後清空
     val suggestions: List<String> = emptyList(),
-    // 熱門音樂榜單（空狀態區塊）：init 自動載入各區域榜單，僅在 searched == false 時顯示
-    val trendingByRegion: Map<ChartRegion, TrendingState> = emptyMap()
+    // 搜尋紀錄（最新在前，最多 10 筆，空白/清除時顯示空狀態提示）
+    val history: List<String> = emptyList()
 )
 
 sealed interface SearchIntent {
@@ -58,7 +52,7 @@ sealed interface SearchIntent {
     data class SelectSuggestion(val value: String) : SearchIntent
     data object LoadMore : SearchIntent
     data class AddToPlaylist(val video: VideoResult, val playlistId: Long) : SearchIntent
-    data object TrendingRetry : SearchIntent
+    data object ClearHistory : SearchIntent
 }
 
 @HiltViewModel
@@ -67,8 +61,10 @@ class SearchViewModel @Inject constructor(
     private val addToPlaylist: AddToPlaylistUseCase,
     private val createPlaylist: CreatePlaylistUseCase,
     observePlaylists: ObservePlaylistsUseCase,
-    private val fetchTrendingSongs: FetchTrendingSongsUseCase,
-    private val searchSuggestions: SearchSuggestionsUseCase
+    private val searchSuggestions: SearchSuggestionsUseCase,
+    observeSearchHistory: ObserveSearchHistoryUseCase,
+    private val addSearchHistory: AddSearchHistoryUseCase,
+    private val clearSearchHistory: ClearSearchHistoryUseCase
 ) : ViewModel() {
 
     companion object {
@@ -102,7 +98,9 @@ class SearchViewModel @Inject constructor(
         observePlaylists()
             .onEach { list -> _playlists.value = list }
             .launchIn(viewModelScope)
-        fetchTrending()
+        observeSearchHistory()
+            .onEach { list -> _state.update { it.copy(history = list) } }
+            .launchIn(viewModelScope)
         collectSuggestions()
     }
 
@@ -136,8 +134,8 @@ class SearchViewModel @Inject constructor(
         when (intent) {
             is SearchIntent.QueryChanged -> {
                 _state.update { it.copy(query = intent.value) }
-                // 空白查詢：重置搜尋狀態回推薦頁（熱門榜單），提供「清除搜尋 / 返回」路徑。
-                // 不觸碰 trendingByRegion（既有快取，返回時直接顯示）；同時隱藏建議並無效化
+                // 空白查詢：重置搜尋狀態回空狀態（最近搜尋/提示文字）。
+                // 不觸碰 history（observeAll 持續推送）；隱藏建議並無效化
                 // debounce 管道中的前一輪事件（suggestionEpoch++）。
                 if (intent.value.isBlank()) {
                     suggestionEpoch++
@@ -161,12 +159,17 @@ class SearchViewModel @Inject constructor(
                 // 執行明確搜尋：隱藏建議並無效化 debounce 管道中仍在等待的前一輪事件
                 suggestionEpoch++
                 _state.update { it.copy(suggestions = emptyList()) }
+                val query = _state.value.query.trim()
+                if (query.isNotEmpty()) {
+                    viewModelScope.launch { addSearchHistory(query) }
+                }
                 doSearch()
             }
             // 點擊建議：填回搜尋框並直接觸發搜尋；同 Search 清空建議並無效化管道
             is SearchIntent.SelectSuggestion -> {
                 suggestionEpoch++
                 _state.update { it.copy(query = intent.value, suggestions = emptyList()) }
+                viewModelScope.launch { addSearchHistory(intent.value.trim()) }
                 doSearch()
             }
             SearchIntent.LoadMore -> loadMore()
@@ -174,53 +177,8 @@ class SearchViewModel @Inject constructor(
                 intent.video.toPlaylistItem(intent.playlistId),
                 intent.playlistId
             )
-            SearchIntent.TrendingRetry -> fetchTrending()
-        }
-    }
-
-    /**
-     * 抓取各區域熱門音樂榜單；各區域獨立載入，失敗僅寫入對應 [TrendingState.error]，不擋搜尋。
-     *
-     * 重入策略（取其簡且穩）：「各區域自己的 loading 旗標即重入 guard」——本次呼叫只對
-     * 未載入中（`loading == false`，含失敗待重試）的區域發起抓取，已載入中的區域不重複發起，
-     * 避免快速重觸發造成重複網路請求（每次抓取皆為多頁分頁聚合，成本高）。init 首載時所有
-     * 區域皆未載入故全抓；[SearchIntent.TrendingRetry] 同樣整批重抓非載入中的區域。
-     * 結果以 `trendingByRegion + (region to ...)` 覆蓋單一區域，其餘區域既有內容不受影響
-     * （區域獨立）。
-     */
-    private fun fetchTrending() {
-        val current = _state.value.trendingByRegion
-        val toFetch = ChartRegion.DISPLAY_ORDER.filter { region ->
-            current[region]?.loading != true
-        }
-        if (toFetch.isEmpty()) return
-        _state.update { st ->
-            st.copy(
-                trendingByRegion = st.trendingByRegion +
-                    toFetch.associateWith { TrendingState(loading = true) }
-            )
-        }
-        viewModelScope.launch {
-            for (region in toFetch) {
-                launch {
-                    fetchTrendingSongs(region)
-                        .onSuccess { list ->
-                            _state.update { st ->
-                                st.copy(
-                                    trendingByRegion = st.trendingByRegion +
-                                        (region to TrendingState(items = list))
-                                )
-                            }
-                        }
-                        .onFailure { e ->
-                            _state.update { st ->
-                                st.copy(
-                                    trendingByRegion = st.trendingByRegion +
-                                        (region to TrendingState(error = e.message))
-                                )
-                            }
-                        }
-                }
+            SearchIntent.ClearHistory -> {
+                viewModelScope.launch { clearSearchHistory() }
             }
         }
     }
