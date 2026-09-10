@@ -23,7 +23,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +52,7 @@ import com.youxiang8727.mymediaplayer.core.domain.model.PlayQueueItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.toPlayQueueItem
 import com.youxiang8727.mymediaplayer.core.ui.component.DurationBadge
+import com.youxiang8727.mymediaplayer.core.ui.component.VideoRailSkeleton
 import com.youxiang8727.mymediaplayer.core.ui.component.VideoThumbnail
 import com.youxiang8727.mymediaplayer.core.ui.component.VideoThumbnailWithBadge
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
@@ -187,12 +187,7 @@ private fun TrendingSection(
     onAdd: (VideoResult) -> Unit
 ) {
     when {
-        trending.loading -> Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 48.dp),
-            contentAlignment = Alignment.Center
-        ) { CircularProgressIndicator() }
+        trending.loading -> VideoRailSkeleton(modifier = Modifier.fillMaxWidth())
 
         else -> {
             Row(
@@ -484,7 +479,7 @@ private fun trendingPreviewItems(region: ChartRegion, count: Int): List<VideoRes
     fontScale = 1.0f,
     device = Devices.PIXEL_7_PRO,
     group = "feature-discover",
-    name = "DiscoverScreen - Loading - Dark"
+    name = "DiscoverScreen - Skeleton - Dark"
 )
 @Preview(
     showBackground = true,
@@ -493,12 +488,12 @@ private fun trendingPreviewItems(region: ChartRegion, count: Int): List<VideoRes
     fontScale = 1.0f,
     device = Devices.PIXEL_7_PRO,
     group = "feature-discover",
-    name = "DiscoverScreen - Loading - Light"
+    name = "DiscoverScreen - Skeleton - Light"
 )
 @Composable
-private fun DiscoverScreenLoadingPreview() {
+private fun DiscoverScreenSkeletonPreview() {
     MyMediaPlayerTheme {
-        // 初始載入：全部區域皆在載入中，驗證各區域獨立 spinner
+        // 初始載入：全部區域皆在載入中，驗證 4 區 region-level skeleton 並排
         DiscoverScreen(
             state = DiscoverUiState(
                 trendingByRegion = ChartRegion.DISPLAY_ORDER.associateWith {
