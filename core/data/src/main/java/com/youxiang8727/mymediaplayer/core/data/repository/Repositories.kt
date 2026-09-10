@@ -83,6 +83,14 @@ class PlaylistRepositoryImpl @Inject constructor(
     override suspend fun clearStreamFailed(videoId: String) =
         dao.clearStreamFailed(videoId)
 
+    // ── 最近加入（為你推薦種子 / 已知 videoId 快照）──
+
+    override fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>> =
+        dao.observeRecentItems(limit).map { entities ->
+            // SQL 已依 addedAt DESC 排序並 LIMIT；此處依 videoId 去重保留最新一筆
+            entities.map { it.toDomain() }.distinctBy { it.videoId }
+        }
+
     // ── 隨機 ──
 
     override suspend fun getRandomItem(playlistId: Long): PlaylistItem? =

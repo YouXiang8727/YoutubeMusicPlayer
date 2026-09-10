@@ -105,6 +105,15 @@ fun DiscoverScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
+                    // 「為你推薦」置頂於熱門榜單之上（展開完整榜單時本分支不渲染）
+                    item {
+                        RecommendationSection(
+                            recommendation = state.recommendation,
+                            onRefresh = { onIntent(DiscoverIntent.RecommendationRefresh) },
+                            onPlayQueue = onPlayChartQueue,
+                            onAdd = { showPickerVideo = it }
+                        )
+                    }
                     items(ChartRegion.DISPLAY_ORDER) { region ->
                         TrendingSection(
                             title = region.displayTitle(),
@@ -248,9 +257,80 @@ private fun TrendingSection(
     }
 }
 
+/**
+ * 「為你推薦」區塊（rail 模式置頂於熱門榜單之上）。
+ *
+ * 狀態對映：loading → [VideoRailSkeleton]；error → [TrendingError]（重試）；
+ * 種子為空（[RecommendationState.seedEmpty]）→ 空狀態引導加入歌曲；成功 → 複用
+ * [ChartRail]（起播＝整份推薦清單為暫時性佇列，「＋」＝加入播放清單）。
+ * 「換一批」僅在成功取得內容時顯示（以相同種子重新抓取）。
+ */
+@Composable
+private fun RecommendationSection(
+    recommendation: RecommendationState,
+    onRefresh: () -> Unit,
+    onPlayQueue: (List<PlayQueueItem>, Int) -> Unit,
+    onAdd: (VideoResult) -> Unit
+) {
+    when {
+        recommendation.loading -> VideoRailSkeleton(modifier = Modifier.fillMaxWidth())
+
+        else -> {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "為你推薦",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                if (recommendation.items.isNotEmpty()) {
+                    TextButton(onClick = onRefresh) { Text("換一批") }
+                }
+            }
+
+            when {
+                recommendation.error != null -> TrendingError(
+                    message = recommendation.error,
+                    onRetry = onRefresh,
+                    title = "推薦載入失敗"
+                )
+
+                recommendation.items.isEmpty() -> Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        if (recommendation.seedEmpty) {
+                            "先加入幾首歌到播放清單，這裡就會出現推薦"
+                        } else {
+                            "暫無推薦歌曲"
+                        },
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                else -> ChartRail(
+                    items = recommendation.items,
+                    onPlayChartQueue = onPlayQueue,
+                    onAdd = onAdd
+                )
+            }
+        }
+    }
+}
+
 /** 熱門榜單載入失敗（內嵌重試）。 */
 @Composable
-private fun TrendingError(message: String?, onRetry: () -> Unit) {
+private fun TrendingError(
+    message: String?,
+    onRetry: () -> Unit,
+    title: String = "熱門榜單載入失敗"
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -258,7 +338,7 @@ private fun TrendingError(message: String?, onRetry: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            "熱門榜單載入失敗",
+            title,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -472,6 +552,18 @@ private fun trendingPreviewItems(region: ChartRegion, count: Int): List<VideoRes
         )
     }
 
+/** 產生「為你推薦」Preview 用假資料（縮圖留空，與既有 Preview 慣例一致）。 */
+private fun recommendationPreviewItems(count: Int): List<VideoResult> =
+    List(count) { i ->
+        VideoResult(
+            "recommendation-$i",
+            "為你推薦歌曲 ${i + 1}",
+            "",
+            "推薦歌手 $i",
+            "4:0${i % 10}"
+        )
+    }
+
 @Preview(
     showBackground = true,
     uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
@@ -616,6 +708,87 @@ private fun DiscoverScreenErrorPreview() {
                         items = trendingPreviewItems(ChartRegion.WESTERN, 5)
                     )
                 )
+            ),
+            playlists = emptyList(),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {},
+            onCreatePlaylistAndAdd = { _, _ -> },
+            onPlayChartQueue = { _, _ -> }
+        )
+    }
+}
+
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-discover",
+    name = "DiscoverScreen - Recommendation Rail - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-discover",
+    name = "DiscoverScreen - Recommendation Rail - Light"
+)
+@Composable
+private fun DiscoverScreenRecommendationRailPreview() {
+    MyMediaPlayerTheme {
+        // 「為你推薦」rail 置頂於台灣熱門之上；8 筆 < rail 上限驗證整批顯示＋「換一批」按鈕
+        DiscoverScreen(
+            state = DiscoverUiState(
+                trendingByRegion = mapOf(
+                    ChartRegion.TAIWAN to TrendingState(
+                        items = trendingPreviewItems(ChartRegion.TAIWAN, 12)
+                    ),
+                    ChartRegion.WESTERN to TrendingState(
+                        items = trendingPreviewItems(ChartRegion.WESTERN, 5)
+                    )
+                ),
+                recommendation = RecommendationState(items = recommendationPreviewItems(8))
+            ),
+            playlists = emptyList(),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {},
+            onCreatePlaylistAndAdd = { _, _ -> },
+            onPlayChartQueue = { _, _ -> }
+        )
+    }
+}
+
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-discover",
+    name = "DiscoverScreen - Recommendation Empty - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-discover",
+    name = "DiscoverScreen - Recommendation Empty - Light"
+)
+@Composable
+private fun DiscoverScreenRecommendationEmptyPreview() {
+    MyMediaPlayerTheme {
+        // 種子為空（播放清單還沒有歌）：推薦區塊顯示引導文案，下方熱門榜單不受影響
+        DiscoverScreen(
+            state = DiscoverUiState(
+                trendingByRegion = ChartRegion.DISPLAY_ORDER.associateWith {
+                    TrendingState(items = trendingPreviewItems(it, 5))
+                },
+                recommendation = RecommendationState(seedEmpty = true)
             ),
             playlists = emptyList(),
             snackbarHostState = remember { SnackbarHostState() },

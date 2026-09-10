@@ -7,11 +7,14 @@ import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import com.youxiang8727.mymediaplayer.core.domain.model.toPlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
+import com.youxiang8727.mymediaplayer.core.domain.repository.RecommendationRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.VideoRepository
 import com.youxiang8727.mymediaplayer.core.domain.usecase.AddToPlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.FetchRecommendationsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.FetchTrendingSongsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.ObserveRecentPlaylistItemsUseCase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -24,6 +27,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -72,13 +76,16 @@ class DiscoverViewModelTest {
 
     /**
      * 播放清單 Fake：可覆寫 [addItemError] 模擬加入失敗；記錄建立與加入呼叫供斷言。
-     * playlists 以 [MutableStateFlow] 暴露，測試可直接更新模擬 observe 推送。
+     * playlists 以 [MutableStateFlow] 暴露，測試可直接更新模擬 observe 推送；
+     * recentItemsFlow 同理模擬 `observeRecentItems`（「為你推薦」種子來源）推送。
      */
     private class FakePlaylistRepository(
         initialPlaylists: List<Playlist> = emptyList(),
+        initialRecentItems: List<PlaylistItem> = emptyList(),
         var addItemError: Boolean = false
     ) : PlaylistRepository {
         val playlistsFlow = MutableStateFlow(initialPlaylists)
+        val recentItemsFlow = MutableStateFlow(initialRecentItems)
         val createdPlaylists = mutableListOf<String>()
         val addedItems = mutableListOf<Pair<Long, PlaylistItem>>()
 
@@ -107,29 +114,54 @@ class DiscoverViewModelTest {
         override suspend fun getRandomItem(playlistId: Long): PlaylistItem? = null
         override suspend fun markStreamFailed(videoId: String, failedAt: Long) {}
         override suspend fun clearStreamFailed(videoId: String) {}
+
+        override fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>> = recentItemsFlow
+    }
+
+    /** 「為你推薦」資料源 Fake：記錄收到的種子與 limit 供斷言，結果可覆寫。 */
+    private class FakeRecommendationRepository(
+        var result: Result<List<VideoResult>> = Result.success(emptyList())
+    ) : RecommendationRepository {
+        var calls = 0
+        val receivedSeeds = mutableListOf<List<PlaylistItem>>()
+        var receivedLimit: Int? = null
+
+        override suspend fun recommendationsFor(
+            seeds: List<PlaylistItem>,
+            limit: Int
+        ): Result<List<VideoResult>> {
+            calls++
+            receivedSeeds += seeds
+            receivedLimit = limit
+            return result
+        }
     }
 
     private class Harness(
         val vm: DiscoverViewModel,
         val repo: FakeVideoRepository,
         val playlistRepo: FakePlaylistRepository,
+        val recRepo: FakeRecommendationRepository,
         val messages: MutableList<String>
     )
 
     private fun buildHarness(
         repo: FakeVideoRepository,
-        playlistRepo: FakePlaylistRepository = FakePlaylistRepository()
+        playlistRepo: FakePlaylistRepository = FakePlaylistRepository(),
+        recRepo: FakeRecommendationRepository = FakeRecommendationRepository()
     ): Harness {
         val vm = DiscoverViewModel(
             FetchTrendingSongsUseCase(repo),
             AddToPlaylistUseCase(playlistRepo),
             CreatePlaylistUseCase(playlistRepo),
-            ObservePlaylistsUseCase(playlistRepo)
+            ObservePlaylistsUseCase(playlistRepo),
+            FetchRecommendationsUseCase(recRepo),
+            ObserveRecentPlaylistItemsUseCase(playlistRepo)
         )
         val messages = mutableListOf<String>()
         // 先於任何 VM 動作前訂閱 messages，確保 SharedFlow（replay=0）不會漏接。
         CoroutineScope(dispatcher).launch { vm.messages.collect { messages.add(it) } }
-        return Harness(vm, repo, playlistRepo, messages)
+        return Harness(vm, repo, playlistRepo, recRepo, messages)
     }
 
     @Test
@@ -339,5 +371,141 @@ class DiscoverViewModelTest {
         // createPlaylist 已在加入前建立；加入失敗 → 失敗訊息
         assertEquals(listOf("我的最愛"), playlistRepo.createdPlaylists)
         assertTrue(h.messages.contains("建立失敗：add failed"))
+    }
+
+    // --- 「為你推薦」 ---
+
+    /** 產生種子用 PlaylistItem（跟既有測試慣例一致，只比對關鍵欄位）。 */
+    private fun seedItem(videoId: String) = PlaylistItem(
+        videoId = videoId,
+        title = "seed $videoId",
+        thumbnailUrl = "",
+        playlistId = 1L
+    )
+
+    @Test
+    fun `init 種子非空抓取推薦成功寫入 items`() {
+        val seeds = listOf(seedItem("s1"), seedItem("s2"))
+        val recRepo = FakeRecommendationRepository(Result.success(listOf(v1, v2)))
+        val h = buildHarness(
+            repo = FakeVideoRepository(),
+            playlistRepo = FakePlaylistRepository(initialRecentItems = seeds),
+            recRepo = recRepo
+        )
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val recommendation = h.vm.state.value.recommendation
+        assertEquals(listOf(v1, v2), recommendation.items)
+        assertNull(recommendation.error)
+        assertFalse(recommendation.loading)
+        assertFalse(recommendation.seedEmpty)
+        // 種子原樣透傳、limit 用 domain 常數
+        assertEquals(1, recRepo.calls)
+        assertEquals(seeds, recRepo.receivedSeeds.single())
+        assertEquals(FetchRecommendationsUseCase.RECOMMENDATION_LIMIT, recRepo.receivedLimit)
+    }
+
+    @Test
+    fun `init 種子空 seedEmpty=true 且不觸發抓取`() {
+        val recRepo = FakeRecommendationRepository()
+        val h = buildHarness(repo = FakeVideoRepository(), recRepo = recRepo)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val recommendation = h.vm.state.value.recommendation
+        assertTrue(recommendation.seedEmpty)
+        assertEquals(emptyList<VideoResult>(), recommendation.items)
+        assertNull(recommendation.error)
+        assertEquals(0, recRepo.calls)
+    }
+
+    @Test
+    fun `抓取失敗寫入 error 且 items 為空`() {
+        val recRepo = FakeRecommendationRepository(
+            Result.failure(RuntimeException("related down"))
+        )
+        val h = buildHarness(
+            repo = FakeVideoRepository(),
+            playlistRepo = FakePlaylistRepository(
+                initialRecentItems = listOf(seedItem("s1"))
+            ),
+            recRepo = recRepo
+        )
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val recommendation = h.vm.state.value.recommendation
+        assertEquals("related down", recommendation.error)
+        assertEquals(emptyList<VideoResult>(), recommendation.items)
+        assertFalse(recommendation.seedEmpty)
+        assertFalse(recommendation.loading)
+    }
+
+    @Test
+    fun `RecommendationRefresh 以相同種子重新抓取成功`() {
+        val seeds = listOf(seedItem("s1"), seedItem("s2"))
+        // 初始失敗 → error 可重試
+        val recRepo = FakeRecommendationRepository(
+            Result.failure(RuntimeException("down"))
+        )
+        val h = buildHarness(
+            repo = FakeVideoRepository(),
+            playlistRepo = FakePlaylistRepository(initialRecentItems = seeds),
+            recRepo = recRepo
+        )
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("down", h.vm.state.value.recommendation.error)
+        assertEquals(1, recRepo.calls)
+
+        // 後端恢復後「換一批」：同一組種子重新抓取、成功寫入並清除 error
+        recRepo.result = Result.success(listOf(v1))
+        h.vm.onIntent(DiscoverIntent.RecommendationRefresh)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val recommendation = h.vm.state.value.recommendation
+        assertEquals(listOf(v1), recommendation.items)
+        assertNull(recommendation.error)
+        assertFalse(recommendation.loading)
+        assertEquals(2, recRepo.calls)
+        assertEquals(seeds, recRepo.receivedSeeds[0])
+        assertEquals(seeds, recRepo.receivedSeeds[1])
+    }
+
+    @Test
+    fun `RecommendationRefresh 種子為空時為 no-op`() {
+        val recRepo = FakeRecommendationRepository()
+        val h = buildHarness(repo = FakeVideoRepository(), recRepo = recRepo)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(h.vm.state.value.recommendation.seedEmpty)
+
+        h.vm.onIntent(DiscoverIntent.RecommendationRefresh)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        // seedEmpty 空狀態下沒有種子可換：不觸發抓取
+        assertEquals(0, recRepo.calls)
+        assertTrue(h.vm.state.value.recommendation.seedEmpty)
+    }
+
+    @Test
+    fun `observeRecentItems 推新種子自動重新抓取`() {
+        // 共用同一 instance：addedAt 為 default 時脈，跨呼叫重建會造成毫秒差異 → flaky
+        val seed1 = seedItem("s1")
+        val seed2 = seedItem("s2")
+        val playlistRepo = FakePlaylistRepository(initialRecentItems = listOf(seed1))
+        val recRepo = FakeRecommendationRepository(Result.success(listOf(v1)))
+        val h = buildHarness(
+            repo = FakeVideoRepository(),
+            playlistRepo = playlistRepo,
+            recRepo = recRepo
+        )
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(1, recRepo.calls)
+        assertEquals(listOf(seed1), recRepo.receivedSeeds.single())
+
+        // 加入新歌 → observeRecentItems 推送新種子 → 自動重新產生推薦（非 Refresh intent）
+        playlistRepo.recentItemsFlow.value = listOf(seed2)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(2, recRepo.calls)
+        assertEquals(listOf(seed2), recRepo.receivedSeeds.last())
+        assertEquals(listOf(v1), h.vm.state.value.recommendation.items)
     }
 }

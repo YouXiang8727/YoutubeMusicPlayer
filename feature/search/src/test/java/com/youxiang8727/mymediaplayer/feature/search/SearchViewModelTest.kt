@@ -84,6 +84,7 @@ class SearchViewModelTest {
         override suspend fun getRandomItem(playlistId: Long): PlaylistItem? = null
         override suspend fun markStreamFailed(videoId: String, failedAt: Long) {}
         override suspend fun clearStreamFailed(videoId: String) {}
+        override fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>> = emptyFlow()
     }
 
     /**

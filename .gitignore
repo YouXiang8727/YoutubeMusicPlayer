@@ -39,5 +39,8 @@ Thumbs.db
 # Local tooling (config tracked; deps restored via npm install)
 node_modules/
 
+# Scratch / planning workspace (to-plan drafts, etc.)
+.scratch/
+
 # Captures
 /captures
