@@ -44,6 +44,15 @@ interface PlaylistRepository {
      * 清除某曲的失敗標記（設回 null）。於該曲成功播放（READY）時呼叫。
      */
     suspend fun clearStreamFailed(videoId: String)
+
+    /**
+     * 觀察「最近加入」的歌曲：跨**全部**播放清單依 [PlaylistItem.addedAt] 最新在前、
+     * 依 videoId 去重（保留最新一筆）、最多 [limit] 筆。
+     *
+     * 用途：供應「為你推薦」的推薦種子（配合
+     * `FetchRecommendationsUseCase.SEED_LIMIT` 等常數決定種子數）。
+     */
+    fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>>
 }
 
 /**

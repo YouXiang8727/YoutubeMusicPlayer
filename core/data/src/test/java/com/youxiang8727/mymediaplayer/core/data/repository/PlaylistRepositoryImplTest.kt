@@ -52,6 +52,12 @@ class PlaylistRepositoryImplTest {
                 rows.filter { it.playlistId == playlistId }.sortedByDescending { it.addedAt }
             }
 
+        override fun observeRecentItems(limit: Int): Flow<List<PlaylistItemEntity>> =
+            itemTable.map { rows ->
+                // 模擬 SQL：全表 addedAt DESC + LIMIT（去重在 Repository 層）
+                rows.sortedByDescending { it.addedAt }.take(limit)
+            }
+
         override suspend fun insertItem(entity: PlaylistItemEntity) {
             itemTable.value = itemTable.value.filterNot {
                 it.videoId == entity.videoId && it.playlistId == entity.playlistId
@@ -259,5 +265,83 @@ class PlaylistRepositoryImplTest {
 
         assertNull(repository.observePlaylistItems(id).first().single().streamFailedAt)
         assertNull(dao.itemTable.value.single().streamFailedAt)
+    }
+
+    // ── observeRecentItems（為你推薦種子）──
+
+    @Test
+    fun `observeRecentItems 跨全部清單依 addedAt 降序`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+        dao.itemTable.value = listOf(
+            PlaylistItemEntity(
+                videoId = "v1", title = "T1", thumbnailUrl = "", playlistId = 1L, addedAt = 100L
+            ),
+            PlaylistItemEntity(
+                videoId = "v2", title = "T2", thumbnailUrl = "", playlistId = 2L, addedAt = 300L
+            ),
+            PlaylistItemEntity(
+                videoId = "v3", title = "T3", thumbnailUrl = "", playlistId = 1L, addedAt = 200L
+            )
+        )
+
+        val recent = repository.observeRecentItems(10).first()
+
+        // 跨清單合併，addedAt DESC（v2=300 → v3=200 → v1=100）
+        assertEquals(listOf("v2", "v3", "v1"), recent.map { it.videoId })
+    }
+
+    @Test
+    fun `observeRecentItems 依 videoId 去重且保留最新一筆`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+        dao.itemTable.value = listOf(
+            PlaylistItemEntity(
+                videoId = "v1", title = "舊名稱", thumbnailUrl = "", playlistId = 1L, addedAt = 100L
+            ),
+            // 同 videoId 在另一清單，addedAt 較新 → 應保留（新名稱）
+            PlaylistItemEntity(
+                videoId = "v1", title = "新名稱", thumbnailUrl = "", playlistId = 2L, addedAt = 400L
+            ),
+            PlaylistItemEntity(
+                videoId = "v2", title = "T2", thumbnailUrl = "", playlistId = 1L, addedAt = 300L
+            )
+        )
+
+        val recent = repository.observeRecentItems(10).first()
+
+        assertEquals(listOf("v1", "v2"), recent.map { it.videoId }) // v1 只出現一次
+        assertEquals("新名稱", recent.first().title) // 保留最新一筆（addedAt=400）
+    }
+
+    @Test
+    fun `observeRecentItems 套用 limit 上限`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+        dao.itemTable.value = listOf(
+            PlaylistItemEntity(
+                videoId = "v1", title = "T1", thumbnailUrl = "", playlistId = 1L, addedAt = 100L
+            ),
+            PlaylistItemEntity(
+                videoId = "v2", title = "T2", thumbnailUrl = "", playlistId = 1L, addedAt = 200L
+            ),
+            PlaylistItemEntity(
+                videoId = "v3", title = "T3", thumbnailUrl = "", playlistId = 1L, addedAt = 300L
+            )
+        )
+
+        val recent = repository.observeRecentItems(2).first()
+
+        assertEquals(listOf("v3", "v2"), recent.map { it.videoId }) // 只取 2 筆
+    }
+
+    @Test
+    fun `observeRecentItems 空資料庫回傳空清單`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val recent = repository.observeRecentItems(5).first()
+
+        assertTrue(recent.isEmpty())
     }
 }

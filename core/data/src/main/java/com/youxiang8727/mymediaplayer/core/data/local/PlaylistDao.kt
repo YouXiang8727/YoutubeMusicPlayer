@@ -26,6 +26,14 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlist_items WHERE playlistId = :playlistId ORDER BY addedAt DESC")
     fun observePlaylistItems(playlistId: Long): Flow<List<PlaylistItemEntity>>
 
+    /**
+     * 觀察「最近加入」的歌曲（跨全部播放清單，addedAt 最新在前，最多 limit 筆）。
+     * 供「為你推薦」種子與已知 videoId 快照使用；無需新表、不 bump DB version。
+     * 去重（videoId）在 Repository 層以 distinctBy 處理（SQL 全表含跨清單重複列）。
+     */
+    @Query("SELECT * FROM playlist_items ORDER BY addedAt DESC LIMIT :limit")
+    fun observeRecentItems(limit: Int): Flow<List<PlaylistItemEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertItem(entity: PlaylistItemEntity)
 
