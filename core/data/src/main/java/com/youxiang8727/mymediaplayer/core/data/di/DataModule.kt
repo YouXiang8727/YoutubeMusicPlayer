@@ -22,11 +22,13 @@ import com.youxiang8727.mymediaplayer.core.data.remote.stream.StreamClock
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.StreamErrorClassifier
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.StreamHttpTransport
 import com.youxiang8727.mymediaplayer.core.data.repository.AudioStreamRepositoryImpl
+import com.youxiang8727.mymediaplayer.core.data.repository.PlaybackPreferencesRepositoryImpl
 import com.youxiang8727.mymediaplayer.core.data.repository.PlaylistRepositoryImpl
 import com.youxiang8727.mymediaplayer.core.data.repository.SearchHistoryRepositoryImpl
 import com.youxiang8727.mymediaplayer.core.data.repository.SearchSuggestionRepositoryImpl
 import com.youxiang8727.mymediaplayer.core.data.repository.VideoRepositoryImpl
 import com.youxiang8727.mymediaplayer.core.domain.repository.AudioStreamRepository
+import com.youxiang8727.mymediaplayer.core.domain.repository.PlaybackPreferencesRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.SearchHistoryRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.SearchSuggestionRepository
@@ -161,6 +163,12 @@ abstract class RepositoryModule {
     abstract fun bindSearchHistoryRepository(
         impl: SearchHistoryRepositoryImpl
     ): SearchHistoryRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindPlaybackPreferencesRepository(
+        impl: PlaybackPreferencesRepositoryImpl
+    ): PlaybackPreferencesRepository
 
     @Binds
     @Singleton

@@ -48,6 +48,9 @@ dependencies {
     // NewPipe Extractor（解析音訊串流，無需 API Key）
     implementation(libs.newpipe.extractor)
 
+    // DataStore Preferences（播放偏好持久化：隨機／循環模式）
+    implementation(libs.androidx.datastore.preferences)
+
     // Coroutines + Serialization JSON 解析（ytInitialData / InnerTube / Piped）
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)

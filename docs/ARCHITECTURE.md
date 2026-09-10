@@ -1,6 +1,6 @@
 # MyMediaPlayer 架構文件
 
-> Stack：Kotlin 2.2 + Compose (BOM) + Hilt + Room + Retrofit/OkHttp + Media3 ExoPlayer/MediaSession + NewPipeExtractor
+> Stack：Kotlin 2.2 + Compose (BOM) + Hilt + Room + DataStore Preferences + Retrofit/OkHttp + Media3 ExoPlayer/MediaSession + NewPipeExtractor
 > Build：Gradle 9.4 / AGP 9.2（內建 Kotlin）/ JDK 21
 
 ---
@@ -45,6 +45,7 @@
 - `core.domain.model.PlayerController`：播放控制介面（跨 feature 共用合約），ViewModel 只注入此介面；`play(videoId, title)` 為 Room 播放清單導向（點播曲在清單中→整份清單起播，否則單曲），`playQueue(items, startIndex)` 為**暫時性佇列**（熱門榜單等非 Room 清單直接以傳入清單起播，播放模式機制共用）
 - `core.domain.model.PlayQueueItem`：暫時性佇列項目（videoId + title 純 data class，零序列化標註；提供 `VideoResult.toPlayQueueItem()` 轉換）。傳遞採 controller 層平行 arrays（videoIds/titles）過 Intent，維持 domain 零序列化依賴
 - `core.domain.model.PlaybackSnapshot` / `RepeatMode`：播放狀態快照與循環模式枚舉
+- `core.domain.model.PlaybackPreferences` / `core.domain.repository.PlaybackPreferencesRepository`：播放偏好（`shuffleEnabled`＋`repeatMode`，`RepeatMode` 僅 ALL/ONE 兩態）與持久化領域埠：`get()` 讀取上次播放模式（無資料回傳預設 shuffle=false / repeatMode=ALL）、`save(preferences)` 覆寫。供 `MusicService` 建立時還原、切換時保存（實作在 core:data，UI 不直接觸及）
 - `core.domain.repository.VideoRepository` / `PlaylistRepository`：interface（`VideoRepository.search(query, continuationToken: String? = null): Result<VideoSearchPage>`）。`PlaylistRepository` 含 `observePlaylistItems` / `addItem` / `removeItem` / `clearPlaylist` / `getRandomItem` 及播放失敗標記 `markStreamFailed(videoId, failedAt)` / `clearStreamFailed(videoId)`（videoId 為 playlist_items 全域主鍵，不需 playlistId；供 MusicService 於**任一播放錯誤**時標記、**成功播放（READY）**時清除）
 - `core.domain.repository.AudioStreamRepository`：音訊串流解析領域埠（interface）：`resolveAudioUrl(videoId: String, force: Boolean = false): Result<String>`。`force=true` 表示跳過 TTL 快取強制重解析（用於 content URL 403 過期後重試同曲）；快取細節封在 core:data，此介面只暴露語意
 - `core.domain.repository.SearchSuggestionRepository`：搜尋建議領域埠（interface）：`suggestions(query: String): List<String>`（回建議字串清單；空白/過短回空、不丟例外，錯誤封在實作）
@@ -73,7 +74,8 @@
   - `@SuggestionsProfile`：乾淨 client（connect/read 皆 5s 短逾時），搜尋建議端點（Google suggestqueries）專用——不需瀏覽器 header，避免與乾淨 client 混用
   - 教訓：瀏覽器 header 一旦覆蓋 InnerTube client 身份 UA 或 extractor 自帶 UA，串流解析即遭 LOGIN_REQUIRED，故兩 profile 嚴禁混用
 - `repository.*Impl`：實作 domain interface（Entity ↔ Domain mapping）；`SearchSuggestionRepositoryImpl` 委派 `SearchSuggestionDataSource`（trim＋空白防禦，不觸網）；`SearchHistoryRepositoryImpl` 委派 `SearchHistoryDao`（add：trim＋空白忽略＋REPLACE upsert＋trimToLimit 上限汰除；observeAll：Entity → query 字串 list，最新在前）
-- `di.DataModule`：Database / Dispatcher / Repository 三組綁定（含 `SearchSuggestionRepository`、`SearchSuggestionDataSource`、`SearchHistoryRepository` 的 @Binds；`DatabaseModule` 註冊 `MIGRATION_2_3`＋`MIGRATION_3_4`＋`MIGRATION_4_5` 並提供 `SearchHistoryDao`）
+- `repository.PlaybackPreferencesRepositoryImpl`：播放偏好持久化實作——`androidx.datastore.preferences`（DataStore 1.2.1）`preferencesDataStore("playback_preferences")` delegate（檔頭 top-level，process 內單例）；keys：`shuffle_enabled`（boolean）、`repeat_mode`（string，存 `RepeatMode.name`）。`get()`：缺 key 或 unknown 字串 fallback 預設（shuffle=false、repeatMode=ALL）；`save()`：`edit {}` 覆寫。DataStore 內部自管 IO scope（`edit`/`data.first()` 皆 suspend），直接呼叫不需額外 dispatcher。建構子：Hilt 走 `@ApplicationContext` 取 Context delegate（`@Inject` constructor 僅 Context 一參數）；JVM 測試以 `PreferenceDataStoreFactory.create()` 建真實 DataStore 注入 internal 建構子
+- `di.DataModule`：Database / Dispatcher / Repository 三組綁定（含 `SearchSuggestionRepository`、`SearchSuggestionDataSource`、`SearchHistoryRepository`、`PlaybackPreferencesRepository` 的 @Binds；`DatabaseModule` 註冊 `MIGRATION_2_3`＋`MIGRATION_3_4`＋`MIGRATION_4_5` 並提供 `SearchHistoryDao`）
 
 ### core:ui
 - `core.ui.theme.MyMediaPlayerTheme` / Color / Type
@@ -92,6 +94,7 @@
 - `feature.player.MiniPlayerBar`：前景常駐迷你播放列（隨機／前後曲／循環／歌名／進度條），由 app 層掛載於底部
 - `feature.player.service.MusicService`：Media3 `MediaSessionService`
   - 播放佇列：點播曲目在播放清單中 → 整份清單從該曲起播；否則單曲（`playback.PlaybackQueueBuilder` 純函數，有單元測試）
+  - **播放模式（隨機／循環）持久化**：onCreate 由 `PlaybackPreferencesRepository.get()` 還原上次模式（取代硬編碼 `REPEAT_MODE_ALL`；無檔回傳預設、行為一致），**還原防覆蓋**：以 `playbackModeUserModified` flag 在 read 前後各檢查一次——user 在還原完成前從通知切換了隨機/循環，listener 設 flag=true，還原 suspend 點返回後偵測到即跳過（避免 DataStore 首次讀取數百 ms 期間 user 已手動切換後又被舊值覆蓋）；`onShuffleModeEnabledChanged`/`onRepeatModeChanged` listener 於設 flag + 刷新通知外 fire-and-forget `save()`（還原觸發的寫回因 flag 已為 true 仍正常持久化，idempotent 無害）；domain ↔ Media3 常數映射 helper（`RepeatMode.toExoRepeatMode()` / `Int.toDomainRepeatMode()`）收在 service 內（Media3 常數不進 core:domain）
   - 暫時性佇列（熱門榜單）：經 `PlayerController.playQueue` → `ACTION_PLAY_QUEUE`（平行陣列 videoIds/titles 過 Intent）直接起播，**不查 Room**；`PlaybackQueueBuilder.buildFromEntries` 純函數（startIndex clamp、空清單回 size 0），有單元測試
   - 串流 URL 以 `ResolvingDataSource` 於載入當下逐首解析（NewPipe）
   - **播放失敗標記（任一錯誤）**：`onPlayerError` 攔截 Media3 `Player.Listener`，**所有播放錯誤**（不限 403）都以 fire-and-forget 呼叫 `PlaylistRepository.markStreamFailed(currentVideoId, now)` 持久化該曲失敗標記（`pendingFailureMarks` 追蹤未落地 job，供 READY 時取消）。**content URL 403 額外自動恢復**：辨識 cause chain 中的 `HttpDataSource.InvalidResponseCodeException`（responseCode == 403）後分層處理——① 失效該 videoId session 級 memoize + `resolveAudioUrl(videoId, force=true)` 強制重解析同曲，成功則回到原 position 重試同一首；② 重新解析仍失敗 → 依 `repeatMode` 切歌（`REPEAT_MODE_ONE` 重播同一首；`REPEAT_MODE_ALL/OFF` 走 `seekToNextMediaItem()`，無下一首則回繞或自然停）。非 403 錯誤不攔截，維持既有 snapshot/error 顯示。**失敗標記清除**：`onPlaybackStateChanged(READY)`（該曲播放成功，無論手動點播/自動續播/403 重解析成功）時對現行 mediaId 取消 pending mark job 並 `clearStreamFailed`（mark 於 error 時提交、clear 於 READY 時提交，前者必然先入 Room 單線程 transaction executor；取消 pending job 防交錯。暫時性佇列對 Room UPDATE 為 no-op，自然只影響 Room 清單）。併發防護：`pending403Handling` 防同 videoId 重入，`retryCounts` 上限 `MAX_403_RETRY_PER_VIDEO=3` 防無限重試（READY 成功播放時重設該曲計數）

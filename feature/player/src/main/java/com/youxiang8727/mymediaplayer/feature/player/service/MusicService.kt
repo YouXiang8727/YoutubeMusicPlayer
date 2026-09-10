@@ -27,6 +27,9 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.youxiang8727.mymediaplayer.core.domain.repository.AudioStreamRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
 import com.youxiang8727.mymediaplayer.core.domain.model.PlayQueueItem
+import com.youxiang8727.mymediaplayer.core.domain.model.PlaybackPreferences
+import com.youxiang8727.mymediaplayer.core.domain.model.RepeatMode
+import com.youxiang8727.mymediaplayer.core.domain.repository.PlaybackPreferencesRepository
 import com.youxiang8727.mymediaplayer.feature.player.R
 import com.youxiang8727.mymediaplayer.feature.player.playback.PlaybackQueueBuilder
 import dagger.hilt.android.AndroidEntryPoint
@@ -55,9 +58,13 @@ class MusicService : MediaSessionService() {
 
     @Inject lateinit var streamResolver: AudioStreamRepository
     @Inject lateinit var playlistRepository: PlaylistRepository
+    @Inject lateinit var playbackPreferencesRepository: PlaybackPreferencesRepository
 
     private var player: ExoPlayer? = null
     private var mediaSession: MediaSession? = null
+
+    /** 還原播放模式防覆蓋 flag：user 在還原完成前從通知切換了隨機/循環，則跳過還原。 */
+    private var playbackModeUserModified = false
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -87,8 +94,20 @@ class MusicService : MediaSessionService() {
             .setMediaSourceFactory(
                 mediaSourceFactory
             ).build()
-        newPlayer.repeatMode = Player.REPEAT_MODE_ALL
         player = newPlayer
+
+        // 還原上次播放模式（隨機／循環）：get() 無儲存檔時回傳預設（清單循環、隨機關閉），與既有 hardcode 行為一致。
+        // 還原期間 DataStore 首次讀取需數百 ms，user 可能已從通知切換模式；以 playbackModeUserModified
+        // 雙重檢查（read 前後各一次）避免用舊值覆蓋 user 的新選擇。
+        serviceScope.launch {
+            if (playbackModeUserModified) return@launch
+            val prefs = playbackPreferencesRepository.get()
+            if (playbackModeUserModified) return@launch
+            player?.apply {
+                shuffleModeEnabled = prefs.shuffleEnabled
+                repeatMode = prefs.repeatMode.toExoRepeatMode()
+            }
+        }
 
         // 點通知本體（非按鈕）時把 App 帶回前景；Media3 藉 sessionActivity 設為通知 contentIntent。
         // 以 setClassName 字串指向 app 的 MainActivity，避免 feature:player 對 :app 產生 compile 依賴。
@@ -118,13 +137,19 @@ class MusicService : MediaSessionService() {
             ).apply { setSmallIcon(R.drawable.ic_music_notification) }
         )
 
-        // 監聽播放模式變更，重新設定通知列 custom layout（icon 隨狀態切換）
+        // 監聽播放模式變更：重新設定通知列 custom layout（icon 隨狀態切換）＋ fire-and-forget 持久化
+        // （供下次播放還原）。還原觸發的 listener 同樣命中此 callback → 設 playbackModeUserModified=true
+        // 無害——還原只執行一次且已在 apply 前通過檢查。
         newPlayer.addListener(object : Player.Listener {
             override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                playbackModeUserModified = true
                 refreshNotificationCustomLayout()
+                persistPlaybackPreferences()
             }
             override fun onRepeatModeChanged(repeatMode: Int) {
+                playbackModeUserModified = true
                 refreshNotificationCustomLayout()
+                persistPlaybackPreferences()
             }
         })
 
@@ -175,6 +200,28 @@ class MusicService : MediaSessionService() {
             session.setCustomLayout(controller, buildCustomLayout(session))
         }
     }
+
+    /**
+     * 將目前播放模式（隨機／循環）fire-and-forget 存檔，供下次播放（服務重建）還原。
+     * 於 listener 呼叫當下快照值再 launch，避免排程期間模式又變導致存到舊值。
+     */
+    private fun persistPlaybackPreferences() {
+        val p = player ?: return
+        val shuffle = p.shuffleModeEnabled
+        val repeat = p.repeatMode
+        serviceScope.launch {
+            playbackPreferencesRepository.save(
+                PlaybackPreferences(shuffleEnabled = shuffle, repeatMode = repeat.toDomainRepeatMode())
+            )
+        }
+    }
+
+    /** domain RepeatMode → Media3 常數（Media3 常數不能進 core:domain，映射 helper 收在 service 內）。 */
+    private fun RepeatMode.toExoRepeatMode(): Int =
+        if (this == RepeatMode.ONE) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_ALL
+
+    private fun Int.toDomainRepeatMode(): RepeatMode =
+        if (this == Player.REPEAT_MODE_ONE) RepeatMode.ONE else RepeatMode.ALL
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
