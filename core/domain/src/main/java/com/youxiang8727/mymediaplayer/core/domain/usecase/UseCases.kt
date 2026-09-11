@@ -93,3 +93,22 @@ class ShufflePlayPlaylistUseCase @Inject constructor(
     suspend operator fun invoke(playlistId: Long): PlaylistItem? =
         repository.getRandomItem(playlistId)
 }
+
+class ExportPlaylistUseCase @Inject constructor(
+    private val repository: PlaylistRepository
+) {
+    /** Export a playlist to JSON string. Returns null if playlist not found. */
+    suspend operator fun invoke(playlistId: Long): String? =
+        repository.exportPlaylistAsJson(playlistId)
+}
+
+class ImportPlaylistUseCase @Inject constructor(
+    private val repository: PlaylistRepository
+) {
+    /**
+     * Import a playlist from JSON string.
+     * @return created playlist ID, or null if JSON is invalid.
+     */
+    suspend operator fun invoke(json: String): Long? =
+        repository.importPlaylistFromJson(json)
+}

@@ -47,6 +47,10 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlist_items WHERE playlistId = :playlistId ORDER BY RANDOM() LIMIT 1")
     suspend fun getRandomItem(playlistId: Long): PlaylistItemEntity?
 
+    // ── 匯出用 ──
+    @Query("SELECT * FROM playlist_items")
+    suspend fun getAllItems(): List<PlaylistItemEntity>
+
     // ── 播放失敗標記 ──
     @Query("UPDATE playlist_items SET streamFailedAt = :failedAt WHERE videoId = :videoId")
     suspend fun markStreamFailed(videoId: String, failedAt: Long)

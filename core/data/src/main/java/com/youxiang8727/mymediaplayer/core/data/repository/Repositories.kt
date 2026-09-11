@@ -2,6 +2,7 @@ package com.youxiang8727.mymediaplayer.core.data.repository
 
 import com.youxiang8727.mymediaplayer.core.data.local.PlaylistDao
 import com.youxiang8727.mymediaplayer.core.data.local.PlaylistEntity
+import com.youxiang8727.mymediaplayer.core.data.local.PlaylistItemEntity
 import com.youxiang8727.mymediaplayer.core.data.local.toDomain
 import com.youxiang8727.mymediaplayer.core.data.local.toEntity
 import com.youxiang8727.mymediaplayer.core.data.remote.TrendingPlaylistDataSource
@@ -18,7 +19,18 @@ import com.youxiang8727.mymediaplayer.core.domain.repository.VideoRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 @Singleton
 class VideoRepositoryImpl @Inject constructor(
@@ -95,4 +107,75 @@ class PlaylistRepositoryImpl @Inject constructor(
 
     override suspend fun getRandomItem(playlistId: Long): PlaylistItem? =
         dao.getRandomItem(playlistId)?.toDomain()
+
+    // ── 匯出/匯入 ──
+
+    override suspend fun exportPlaylistAsJson(playlistId: Long): String? {
+        val playlistEntity = dao.observeAllPlaylists()
+            .first()
+            .find { it.id == playlistId } ?: return null
+
+        val items = dao.getAllItems()
+            .filter { it.playlistId == playlistId }
+            .sortedBy { it.addedAt }
+
+        val json = buildJsonObject {
+            put("version", kotlinx.serialization.json.JsonPrimitive(1))
+            put("exportedAt", kotlinx.serialization.json.JsonPrimitive(
+                Instant.now().atOffset(ZoneOffset.UTC)
+                    .format(DateTimeFormatter.ISO_INSTANT)
+            ))
+            put("playlist", buildJsonObject {
+                put("name", kotlinx.serialization.json.JsonPrimitive(playlistEntity.name))
+                put("items", buildJsonArray {
+                    items.forEach { item ->
+                        add(buildJsonObject {
+                            put("videoId", kotlinx.serialization.json.JsonPrimitive(item.videoId))
+                            put("title", kotlinx.serialization.json.JsonPrimitive(item.title))
+                            put("thumbnailUrl", kotlinx.serialization.json.JsonPrimitive(item.thumbnailUrl))
+                            put("channel", kotlinx.serialization.json.JsonPrimitive(item.channel))
+                            item.duration?.let { put("duration", kotlinx.serialization.json.JsonPrimitive(it)) }
+                        })
+                    }
+                })
+            })
+        }
+        return json.toString()
+    }
+
+    override suspend fun importPlaylistFromJson(json: String): Long? {
+        return try {
+            val root = Json.parseToJsonElement(json).jsonObject
+            val playlistObj = root["playlist"]?.jsonObject ?: return null
+            val name = playlistObj["name"]?.jsonPrimitive?.content ?: return null
+            val itemsArray = playlistObj["items"]?.jsonArray ?: return null
+
+            // Create playlist
+            val playlistId = dao.insertPlaylist(PlaylistEntity(name = name))
+
+            // Insert items
+            itemsArray.forEach { element ->
+                val item = element.jsonObject
+                val videoId = item["videoId"]?.jsonPrimitive?.content ?: return@forEach
+                val title = item["title"]?.jsonPrimitive?.content ?: return@forEach
+                val thumbnailUrl = item["thumbnailUrl"]?.jsonPrimitive?.content ?: ""
+                val channel = item["channel"]?.jsonPrimitive?.contentOrNull ?: ""
+                val duration = item["duration"]?.jsonPrimitive?.contentOrNull
+
+                dao.insertItem(
+                    PlaylistItemEntity(
+                        videoId = videoId,
+                        title = title,
+                        thumbnailUrl = thumbnailUrl,
+                        channel = channel,
+                        duration = duration,
+                        playlistId = playlistId
+                    )
+                )
+            }
+            playlistId
+        } catch (e: Exception) {
+            null
+        }
+    }
 }

@@ -53,6 +53,12 @@ interface PlaylistRepository {
      * `FetchRecommendationsUseCase.SEED_LIMIT` 等常數決定種子數）。
      */
     fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>>
+
+    /** Export a single playlist to JSON string. */
+    suspend fun exportPlaylistAsJson(playlistId: Long): String?
+
+    /** Import a playlist from JSON string. Returns created playlist ID, or null on failure. */
+    suspend fun importPlaylistFromJson(json: String): Long?
 }
 
 /**

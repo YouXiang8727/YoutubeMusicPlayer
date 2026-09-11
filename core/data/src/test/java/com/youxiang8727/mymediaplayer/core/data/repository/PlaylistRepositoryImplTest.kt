@@ -77,6 +77,8 @@ class PlaylistRepositoryImplTest {
         override suspend fun getRandomItem(playlistId: Long): PlaylistItemEntity? =
             itemTable.value.filter { it.playlistId == playlistId }.randomOrNull()
 
+        override suspend fun getAllItems(): List<PlaylistItemEntity> = itemTable.value
+
         override suspend fun deletePlaylistWithItemsCascade(playlistId: Long) {
             itemTable.value = itemTable.value.filterNot { it.playlistId == playlistId }
         }
