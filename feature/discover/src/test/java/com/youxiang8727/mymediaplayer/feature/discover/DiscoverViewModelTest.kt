@@ -116,6 +116,9 @@ class DiscoverViewModelTest {
         override suspend fun clearStreamFailed(videoId: String) {}
 
         override fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>> = recentItemsFlow
+
+        override suspend fun exportPlaylistAsJson(playlistId: Long): String? = null
+        override suspend fun importPlaylistFromJson(json: String): Long? = null
     }
 
     /** 「為你推薦」資料源 Fake：記錄收到的種子與 limit 供斷言，結果可覆寫。 */
