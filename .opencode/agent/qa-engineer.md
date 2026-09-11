@@ -1,6 +1,7 @@
 ---
 description: QA Engineer(角色 D)- 獨立驗證工程師。負責單元測試執行、模擬器煙霧測試、logcat crash 監控與發版前回歸。只驗證不開發;功能開發完成後需要獨立品質關卡時使用。
 mode: subagent
+steps: 50
 permission:
   edit:
     "**": ask
