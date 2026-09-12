@@ -81,6 +81,9 @@ class PlaylistDetailViewModelTest {
         override suspend fun markStreamFailed(videoId: String, failedAt: Long) {}
         override suspend fun clearStreamFailed(videoId: String) {}
         override fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>> = flowOf(emptyList())
+        override suspend fun exportPlaylistAsJson(playlistId: Long): String? = null
+        override suspend fun exportAllPlaylistsAsJson(): String? = null
+        override suspend fun importPlaylistFromJson(json: String): Long? = null
     }
 
     /** 記錄 playQueue（暫時性佇列）與 play（Room 路徑）的呼叫供斷言。 */

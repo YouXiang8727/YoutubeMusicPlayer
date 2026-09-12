@@ -5,21 +5,21 @@ import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * 驗證 [ObserveRecentPlaylistItemsUseCase] 為 [PlaylistRepository.observeRecentItems]
- * 的薄轉發：limit 透傳、內容原樣、不額外處理。
+ * 驗證 [ExportAllPlaylistsUseCase] 為 [PlaylistRepository.exportAllPlaylistsAsJson]
+ * 的薄轉發：呼叫次數原樣、結果原樣（null 或 JSON 字串）、不額外處理。
  */
-class ObserveRecentPlaylistItemsUseCaseTest {
+class ExportAllPlaylistsUseCaseTest {
 
     private class FakePlaylistRepository(
-        var recentItems: List<PlaylistItem> = emptyList()
+        private val exportAllResult: String? = null
     ) : PlaylistRepository {
-        val receivedLimits = mutableListOf<Int>()
+        var exportAllCalls = 0
 
         override fun observeAllPlaylists(): Flow<List<Playlist>> =
             MutableStateFlow(emptyList())
@@ -45,47 +45,39 @@ class ObserveRecentPlaylistItemsUseCaseTest {
 
         override suspend fun clearStreamFailed(videoId: String) = Unit
 
-        override fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>> {
-            receivedLimits += limit
-            return MutableStateFlow(recentItems)
-        }
+        override fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>> =
+            MutableStateFlow(emptyList())
 
         override suspend fun exportPlaylistAsJson(playlistId: Long): String? = null
 
-        override suspend fun exportAllPlaylistsAsJson(): String? = null
+        override suspend fun exportAllPlaylistsAsJson(): String? {
+            exportAllCalls++
+            return exportAllResult
+        }
 
         override suspend fun importPlaylistFromJson(json: String): Long? = null
     }
 
-    private fun item(videoId: String, playlistId: Long = 1L) = PlaylistItem(
-        videoId = videoId,
-        title = "Title $videoId",
-        thumbnailUrl = "https://img/$videoId",
-        channel = "Channel",
-        playlistId = playlistId
-    )
-
     @Test
-    fun `limit 透傳且內容原樣回傳`() = runTest {
-        val repo = FakePlaylistRepository(
-            recentItems = listOf(item("v2"), item("v1"))
-        )
-        val useCase = ObserveRecentPlaylistItemsUseCase(repo)
+    fun `無歌單時回傳 null`() = runTest {
+        val repo = FakePlaylistRepository(exportAllResult = null)
+        val useCase = ExportAllPlaylistsUseCase(repo)
 
-        val result = useCase(5).first()
+        val result = useCase()
 
-        assertEquals(5, repo.receivedLimits.single())
-        assertEquals(listOf("v2", "v1"), result.map { it.videoId })
+        assertEquals(1, repo.exportAllCalls)
+        assertNull(result)
     }
 
     @Test
-    fun `空清單原樣透傳`() = runTest {
-        val repo = FakePlaylistRepository(recentItems = emptyList())
-        val useCase = ObserveRecentPlaylistItemsUseCase(repo)
+    fun `JSON 字串原樣回傳`() = runTest {
+        val json = """{"version":2,"playlists":[]}"""
+        val repo = FakePlaylistRepository(exportAllResult = json)
+        val useCase = ExportAllPlaylistsUseCase(repo)
 
-        val result = useCase(3).first()
+        val result = useCase()
 
-        assertEquals(3, repo.receivedLimits.single())
-        assertEquals(emptyList<PlaylistItem>(), result)
+        assertEquals(1, repo.exportAllCalls)
+        assertEquals(json, result)
     }
 }

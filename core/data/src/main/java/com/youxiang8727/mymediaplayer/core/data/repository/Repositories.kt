@@ -2,6 +2,7 @@ package com.youxiang8727.mymediaplayer.core.data.repository
 
 import com.youxiang8727.mymediaplayer.core.data.local.PlaylistDao
 import com.youxiang8727.mymediaplayer.core.data.local.PlaylistEntity
+import com.youxiang8727.mymediaplayer.core.data.local.PlaylistItemEntity
 import com.youxiang8727.mymediaplayer.core.data.local.toDomain
 import com.youxiang8727.mymediaplayer.core.data.local.toEntity
 import com.youxiang8727.mymediaplayer.core.data.remote.TrendingPlaylistDataSource
@@ -18,7 +19,24 @@ import com.youxiang8727.mymediaplayer.core.domain.repository.VideoRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+
+/** 本版本 kotlinx-serialization 無內建 jsonObjectOrNull；沿用專案既有慣例（見 InnerTubeStreamSource）。 */
+private fun JsonElement?.jsonObjectOrNull(): JsonObject? = this as? JsonObject
 
 @Singleton
 class VideoRepositoryImpl @Inject constructor(
@@ -95,4 +113,120 @@ class PlaylistRepositoryImpl @Inject constructor(
 
     override suspend fun getRandomItem(playlistId: Long): PlaylistItem? =
         dao.getRandomItem(playlistId)?.toDomain()
+
+    // ── 匯出/匯入 ──
+
+    override suspend fun exportPlaylistAsJson(playlistId: Long): String? {
+        val playlistEntity = dao.observeAllPlaylists()
+            .first()
+            .find { it.id == playlistId } ?: return null
+
+        val items = dao.getAllItems()
+            .filter { it.playlistId == playlistId }
+            .sortedBy { it.addedAt }
+
+        return buildJsonObject {
+            put("version", JsonPrimitive(1))
+            put("exportedAt", JsonPrimitive(nowIsoString()))
+            put("playlist", buildJsonObject {
+                put("name", JsonPrimitive(playlistEntity.name))
+                put("items", buildJsonArray {
+                    items.forEach { add(itemToJson(it)) }
+                })
+            })
+        }.toString()
+    }
+
+    override suspend fun exportAllPlaylistsAsJson(): String? {
+        val playlists = dao.observeAllPlaylists().first()
+        if (playlists.isEmpty()) return null
+
+        val allItems = dao.getAllItems()
+        return buildJsonObject {
+            put("version", JsonPrimitive(2))
+            put("exportedAt", JsonPrimitive(nowIsoString()))
+            put("playlists", buildJsonArray {
+                playlists.forEach { playlistEntity ->
+                    add(buildJsonObject {
+                        put("name", JsonPrimitive(playlistEntity.name))
+                        put("items", buildJsonArray {
+                            allItems
+                                .filter { it.playlistId == playlistEntity.id }
+                                .sortedBy { it.addedAt }
+                                .forEach { add(itemToJson(it)) }
+                        })
+                    })
+                }
+            })
+        }.toString()
+    }
+
+    override suspend fun importPlaylistFromJson(json: String): Long? {
+        return try {
+            val root = Json.parseToJsonElement(json).jsonObject
+            val single = root["playlist"]?.jsonObject
+            if (single != null) {
+                // v1：單一歌單
+                return importSinglePlaylist(single).takeIf { it != SKIP_SENTINEL }
+            }
+
+            // v2：多歌單 bundle；逐筆跳過無效項目，回傳第一個成功建立的 ID
+            val bundles = root["playlists"]?.jsonArray ?: return null
+            var firstCreated: Long? = null
+            bundles.forEach { element ->
+                val id = importSinglePlaylist(element.jsonObjectOrNull() ?: return@forEach)
+                if (id != SKIP_SENTINEL && firstCreated == null) {
+                    firstCreated = id
+                }
+            }
+            firstCreated
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** 建立單一歌單（v1 / v2 共用）。name 缺失時回傳 [SKIP_SENTINEL] 表示跳過該筆。 */
+    private suspend fun importSinglePlaylist(playlistObj: JsonObject): Long {
+        val name = playlistObj["name"]?.jsonPrimitive?.content ?: return SKIP_SENTINEL
+        val itemsArray = playlistObj["items"]?.jsonArray ?: emptyList()
+        val playlistId = dao.insertPlaylist(PlaylistEntity(name = name))
+
+        itemsArray.forEach { element ->
+            val item = element.jsonObjectOrNull() ?: return@forEach
+            val videoId = item["videoId"]?.jsonPrimitive?.content ?: return@forEach
+            val title = item["title"]?.jsonPrimitive?.content ?: return@forEach
+            val thumbnailUrl = item["thumbnailUrl"]?.jsonPrimitive?.content ?: ""
+            val channel = item["channel"]?.jsonPrimitive?.contentOrNull ?: ""
+            val duration = item["duration"]?.jsonPrimitive?.contentOrNull
+
+            dao.insertItem(
+                PlaylistItemEntity(
+                    videoId = videoId,
+                    title = title,
+                    thumbnailUrl = thumbnailUrl,
+                    channel = channel,
+                    duration = duration,
+                    playlistId = playlistId
+                )
+            )
+        }
+        return playlistId
+    }
+
+    private fun itemToJson(item: PlaylistItemEntity): JsonObject =
+        buildJsonObject {
+            put("videoId", JsonPrimitive(item.videoId))
+            put("title", JsonPrimitive(item.title))
+            put("thumbnailUrl", JsonPrimitive(item.thumbnailUrl))
+            put("channel", JsonPrimitive(item.channel))
+            item.duration?.let { put("duration", JsonPrimitive(it)) }
+        }
+
+    private fun nowIsoString(): String =
+        Instant.now().atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_INSTANT)
+
+    private companion object {
+        /** importSinglePlaylist 的跳過哨兵：該筆（如缺 name）不匯入、不視為失敗。 */
+        const val SKIP_SENTINEL = -1L
+    }
 }

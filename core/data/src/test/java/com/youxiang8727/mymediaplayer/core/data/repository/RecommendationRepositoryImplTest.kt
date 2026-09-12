@@ -69,6 +69,12 @@ class RecommendationRepositoryImplTest {
 
         override fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>> =
             MutableStateFlow(knownItems)
+
+        override suspend fun exportPlaylistAsJson(playlistId: Long): String? = null
+
+        override suspend fun exportAllPlaylistsAsJson(): String? = null
+
+        override suspend fun importPlaylistFromJson(json: String): Long? = null
     }
 
     private fun seed(videoId: String) = PlaylistItem(
