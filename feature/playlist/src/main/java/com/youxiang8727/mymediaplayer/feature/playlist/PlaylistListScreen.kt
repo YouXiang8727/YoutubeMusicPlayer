@@ -63,6 +63,7 @@ fun PlaylistListScreen(
     snackbarHostState: SnackbarHostState,
     onIntent: (PlaylistListIntent) -> Unit,
     onExport: (playlistId: Long) -> Unit,
+    onExportAll: () -> Unit,
     onImport: () -> Unit,
     onOpenPlaylist: (playlistId: Long, name: String) -> Unit
 ) {
@@ -94,7 +95,10 @@ fun PlaylistListScreen(
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f)
                 )
-                TextButton(onClick = onImport) { Text("匯入歌單") }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = onExportAll) { Text("匯出全部") }
+                    TextButton(onClick = onImport) { Text("匯入歌單") }
+                }
             }
 
             when {
@@ -322,6 +326,12 @@ fun PlaylistListRoute(
             pendingExportName = state.playlists.firstOrNull { it.id == id }?.name
             viewModel.onIntent(PlaylistListIntent.Export(id))
         },
+        onExportAll = {
+            // 全部匯出統一使用備份檔名，不沿用單一歌單名稱
+            val date = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
+            pendingExportName = "Backup_$date"
+            viewModel.onIntent(PlaylistListIntent.ExportAll)
+        },
         onImport = { importLauncher.launch("application/json") },
         onOpenPlaylist = onOpenPlaylist
     )
@@ -357,6 +367,7 @@ private fun PlaylistListScreenEmptyPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onExport = {},
+            onExportAll = {},
             onImport = {},
             onOpenPlaylist = { _, _ -> }
         )
@@ -396,6 +407,7 @@ private fun PlaylistListScreenItemsPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onExport = {},
+            onExportAll = {},
             onImport = {},
             onOpenPlaylist = { _, _ -> }
         )

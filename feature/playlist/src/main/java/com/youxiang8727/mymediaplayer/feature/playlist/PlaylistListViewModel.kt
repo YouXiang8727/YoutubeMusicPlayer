@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.DeletePlaylistUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.ExportAllPlaylistsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ExportPlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ImportPlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
@@ -32,6 +33,7 @@ sealed interface PlaylistListIntent {
     data class Delete(val id: Long) : PlaylistListIntent
     data class Rename(val id: Long, val name: String) : PlaylistListIntent
     data class Export(val id: Long) : PlaylistListIntent
+    data object ExportAll : PlaylistListIntent
     data class Import(val json: String) : PlaylistListIntent
 }
 
@@ -42,6 +44,7 @@ class PlaylistListViewModel @Inject constructor(
     private val deletePlaylist: DeletePlaylistUseCase,
     private val renamePlaylist: RenamePlaylistUseCase,
     private val exportPlaylist: ExportPlaylistUseCase,
+    private val exportAllPlaylists: ExportAllPlaylistsUseCase,
     private val importPlaylist: ImportPlaylistUseCase
 ) : ViewModel() {
 
@@ -85,6 +88,12 @@ class PlaylistListViewModel @Inject constructor(
             is PlaylistListIntent.Export -> viewModelScope.launch {
                 val json = exportPlaylist(intent.id)
                 json?.let { _exportResult.tryEmit(it) } ?: _messages.tryEmit("找不到該歌單")
+            }
+
+            is PlaylistListIntent.ExportAll -> viewModelScope.launch {
+                val json = exportAllPlaylists()
+                if (json != null) _exportResult.tryEmit(json)
+                else _messages.tryEmit("尚無任何歌單可匯出")
             }
 
             is PlaylistListIntent.Import -> viewModelScope.launch {

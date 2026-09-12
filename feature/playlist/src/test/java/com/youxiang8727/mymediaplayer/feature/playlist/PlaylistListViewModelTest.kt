@@ -5,6 +5,7 @@ import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
 import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.DeletePlaylistUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.ExportAllPlaylistsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ExportPlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ImportPlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
@@ -43,6 +44,7 @@ class PlaylistListViewModelTest {
     /** ViewModel 只依賴 interface，此 fake 供應 export/import 結果並記錄 import 的 json。 */
     private class FakePlaylistRepository(
         var exportResult: String? = null,
+        var exportAllResult: String? = null,
         var importResult: Long? = null,
         val importCalls: MutableList<String> = mutableListOf()
     ) : PlaylistRepository {
@@ -59,6 +61,7 @@ class PlaylistListViewModelTest {
         override suspend fun clearStreamFailed(videoId: String) {}
         override fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>> = flowOf(emptyList())
         override suspend fun exportPlaylistAsJson(playlistId: Long): String? = exportResult
+        override suspend fun exportAllPlaylistsAsJson(): String? = exportAllResult
         override suspend fun importPlaylistFromJson(json: String): Long? {
             importCalls += json
             return importResult
@@ -78,6 +81,7 @@ class PlaylistListViewModelTest {
             deletePlaylist = DeletePlaylistUseCase(repo),
             renamePlaylist = RenamePlaylistUseCase(repo),
             exportPlaylist = ExportPlaylistUseCase(repo),
+            exportAllPlaylists = ExportAllPlaylistsUseCase(repo),
             importPlaylist = ImportPlaylistUseCase(repo)
         )
         val messages = mutableListOf<String>()
@@ -109,6 +113,29 @@ class PlaylistListViewModelTest {
 
         assertTrue("不應 emit exportResult", h.exports.isEmpty())
         assertEquals("找不到該歌單", h.messages.last())
+    }
+
+    @Test
+    fun `ExportAll 有歌單時 emit JSON 至 exportResult`() {
+        val json = """{"version":2,"playlists":[]}"""
+        val h = buildHarness(FakePlaylistRepository(exportAllResult = json))
+
+        h.vm.onIntent(PlaylistListIntent.ExportAll)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(listOf(json), h.exports)
+        assertTrue("不應有 snackbar 訊息", h.messages.isEmpty())
+    }
+
+    @Test
+    fun `ExportAll 無歌單時發出 snackbar 訊息且不 emit exportResult`() {
+        val h = buildHarness(FakePlaylistRepository(exportAllResult = null))
+
+        h.vm.onIntent(PlaylistListIntent.ExportAll)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue("不應 emit exportResult", h.exports.isEmpty())
+        assertEquals("尚無任何歌單可匯出", h.messages.last())
     }
 
     @Test
