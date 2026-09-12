@@ -1,7 +1,10 @@
 package com.youxiang8727.mymediaplayer.core.domain.usecase
 
 import com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictDecision
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
+import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistImportResult
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
@@ -113,9 +116,12 @@ class ImportPlaylistUseCase @Inject constructor(
     private val repository: PlaylistRepository
 ) {
     /**
-     * Import a playlist from JSON string.
-     * @return created playlist ID, or null if JSON is invalid.
+     * 從 v1/v2 JSON 匯入歌單；遇同名歌單時以 [onConflict] 詢問決策
+     * （取代／兩者皆保留／取消），流程暫停等待決策。
+     * @return null = JSON 結構無法辨識；否則回傳匯入結果統計。
      */
-    suspend operator fun invoke(json: String): Long? =
-        repository.importPlaylistFromJson(json)
+    suspend operator fun invoke(
+        json: String,
+        onConflict: suspend (info: ImportConflictInfo) -> ImportConflictDecision
+    ): PlaylistImportResult? = repository.importPlaylistFromJson(json, onConflict)
 }

@@ -1,5 +1,8 @@
 package com.youxiang8727.mymediaplayer.core.data.repository
 
+import android.database.sqlite.SQLiteConstraintException
+import androidx.room.withTransaction
+import com.youxiang8727.mymediaplayer.core.data.local.AppDatabase
 import com.youxiang8727.mymediaplayer.core.data.local.PlaylistDao
 import com.youxiang8727.mymediaplayer.core.data.local.PlaylistEntity
 import com.youxiang8727.mymediaplayer.core.data.local.PlaylistItemEntity
@@ -9,13 +12,17 @@ import com.youxiang8727.mymediaplayer.core.data.remote.TrendingPlaylistDataSourc
 import com.youxiang8727.mymediaplayer.core.data.remote.YoutubeDataSource
 import com.youxiang8727.mymediaplayer.core.data.remote.stream.FallbackStreamResolver
 import com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictDecision
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
+import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistImportResult
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import com.youxiang8727.mymediaplayer.core.domain.repository.AudioStreamRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.VideoRepository
+import com.youxiang8727.mymediaplayer.core.domain.usecase.PlaylistNameConflictException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
@@ -59,20 +66,55 @@ class AudioStreamRepositoryImpl @Inject constructor(
 }
 
 @Singleton
-class PlaylistRepositoryImpl @Inject constructor(
+class PlaylistRepositoryImpl : PlaylistRepository {
+
     private val dao: PlaylistDao
-) : PlaylistRepository {
+    private val runInTransaction: suspend (block: suspend () -> Unit) -> Unit
+
+    @Inject
+    constructor(dao: PlaylistDao, database: AppDatabase) {
+        this.dao = dao
+        // Replace 決策需要交易性「刪除既有歌單＋重建」：以 Room withTransaction 確保
+        // 中途失敗即整體 rollback，不留半套狀態。
+        this.runInTransaction = { block -> database.withTransaction { block() } }
+    }
+
+    /**
+     * 測試專用建構子（Fake Dao 情境）：Fake 無真實 SQL 交易，直接執行 block。
+     * 正式路徑一律走上方 [@Inject] 建構子（注入 [AppDatabase] 提供 withTransaction）。
+     */
+    internal constructor(dao: PlaylistDao) {
+        this.dao = dao
+        this.runInTransaction = { block -> block() }
+    }
 
     // ── 播放清單 ──
 
     override fun observeAllPlaylists(): Flow<List<Playlist>> =
         dao.observeAllPlaylists().map { entities -> entities.map { it.toDomain() } }
 
-    override suspend fun createPlaylist(name: String): Long =
-        dao.insertPlaylist(PlaylistEntity(name = name))
+    override suspend fun createPlaylist(name: String): Long {
+        val id = dao.insertPlaylist(PlaylistEntity(name = name))
+        // playlists.name 唯一索引：衝突時 IGNORE 回傳 -1（與 SKIP_SENTINEL 同值）——
+        // 語意化錯誤信號，交由 UI 辨識「重名」。
+        if (id == SKIP_SENTINEL) throw PlaylistNameConflictException(name)
+        return id
+    }
 
-    override suspend fun renamePlaylist(playlistId: Long, newName: String) =
-        dao.updatePlaylist(playlistId, newName, System.currentTimeMillis())
+    override suspend fun renamePlaylist(playlistId: Long, newName: String) {
+        // 前置檢查：newName 已被「其他」歌單使用 → 直接拋語意化例外（改名為自己目前名稱屬合法）
+        val existingId = dao.findPlaylistIdByName(newName)
+        if (existingId != null && existingId != playlistId) {
+            throw PlaylistNameConflictException(newName)
+        }
+        try {
+            dao.updatePlaylist(playlistId, newName, System.currentTimeMillis())
+        } catch (e: SQLiteConstraintException) {
+            // 雙保險：前置檢查與實際寫入之間若發生 race，唯一索引仍會擋下重名，
+            // 避免未包裝的底層例外直接炸出
+            throw PlaylistNameConflictException(newName)
+        }
+    }
 
     override suspend fun deletePlaylist(playlistId: Long) {
         dao.deletePlaylistWithItemsCascade(playlistId)
@@ -161,56 +203,158 @@ class PlaylistRepositoryImpl @Inject constructor(
         }.toString()
     }
 
-    override suspend fun importPlaylistFromJson(json: String): Long? {
+    override suspend fun importPlaylistFromJson(
+        json: String,
+        onConflict: suspend (info: ImportConflictInfo) -> ImportConflictDecision
+    ): PlaylistImportResult? {
+        // v1 = 單一 bundle；v2 = 多 bundle。結構無法辨識（無 playlist/playlists 鍵、
+        // 非 JSON、parse 失敗）→ null（維持既有語意）。
+        val bundles = parseBundles(json) ?: return null
+
+        // 預掃：以「初始快照」計算衝突總數（bundle 內與既有歌單重名之筆數，逐筆計算）。
+        // 之後實際依序處理時可能因 bundle 內互撞多出衝突（見邊角防護），conflictIndex 不受影響。
+        val initialNames = dao.observeAllPlaylists().first().map { it.name }.toSet()
+        val totalConflicts = bundles.count { bundle ->
+            val name = bundle["name"]?.jsonPrimitive?.contentOrNull
+            name != null && name in initialNames
+        }
+
+        var created = 0
+        var replaced = 0
+        var keptBoth = 0
+        var cancelled = false
+        var conflictIndex = 0
+
+        for (bundle in bundles) {
+            val name = bundle["name"]?.jsonPrimitive?.contentOrNull
+                ?: continue // 缺 name：無效項目，靜默跳過（非衝突）
+            val items = parseItems(bundle["items"]?.jsonArray ?: emptyList())
+
+            // 衝突偵測以真實唯一索引為準：重名時 insert（IGNORE）回傳 -1。
+            val insertedId = dao.insertPlaylist(PlaylistEntity(name = name))
+            if (insertedId != SKIP_SENTINEL) {
+                insertItems(insertedId, items)
+                created++
+                continue
+            }
+
+            // 衝突：交由 UI 決策（流程於此暫停等待 callback 回傳）
+            conflictIndex++
+            val decision = onConflict(
+                ImportConflictInfo(
+                    name = name,
+                    conflictIndex = conflictIndex,
+                    totalConflicts = totalConflicts
+                )
+            )
+            when (decision) {
+                ImportConflictDecision.Replace -> {
+                    val existingId = dao.findPlaylistIdByName(name)
+                    if (existingId == null) {
+                        // 競態防護：既有歌單已被移除 → 視同一般建立
+                        val id = dao.insertPlaylist(PlaylistEntity(name = name))
+                        if (id != SKIP_SENTINEL) {
+                            insertItems(id, items)
+                            created++
+                        }
+                    } else {
+                        replaced += replacePlaylist(existingId, name, items)
+                    }
+                }
+                ImportConflictDecision.KeepBoth -> {
+                    // 以「原名 (2)」「原名 (3)」...逐次尋找未使用名稱（查 DB 確保不撞既有/新名稱）
+                    val candidate = findAvailableKeepBothName(name)
+                    if (candidate != null) {
+                        val id = dao.insertPlaylist(PlaylistEntity(name = candidate))
+                        if (id != SKIP_SENTINEL) {
+                            insertItems(id, items)
+                            keptBoth++
+                        }
+                    }
+                    // 後綴全滿（極端案例）：靜默跳過該筆，不回報錯誤
+                }
+                ImportConflictDecision.Cancel -> {
+                    cancelled = true
+                    break // 中止後續所有歌單處理，先前已匯入者保留
+                }
+            }
+        }
+
+        return PlaylistImportResult(
+            created = created,
+            replaced = replaced,
+            keptBoth = keptBoth,
+            cancelled = cancelled
+        )
+    }
+
+    /** 解析 JSON 為 bundle 清單；結構無法辨識回傳 null（v1 視為單一 bundle）。 */
+    private fun parseBundles(json: String): List<JsonObject>? {
         return try {
             val root = Json.parseToJsonElement(json).jsonObject
             val single = root["playlist"]?.jsonObject
             if (single != null) {
-                // v1：單一歌單
-                return importSinglePlaylist(single).takeIf { it != SKIP_SENTINEL }
+                listOf(single)
+            } else {
+                root["playlists"]?.jsonArray?.mapNotNull { it.jsonObjectOrNull() }
             }
-
-            // v2：多歌單 bundle；逐筆跳過無效項目，回傳第一個成功建立的 ID
-            val bundles = root["playlists"]?.jsonArray ?: return null
-            var firstCreated: Long? = null
-            bundles.forEach { element ->
-                val id = importSinglePlaylist(element.jsonObjectOrNull() ?: return@forEach)
-                if (id != SKIP_SENTINEL && firstCreated == null) {
-                    firstCreated = id
-                }
-            }
-            firstCreated
         } catch (e: Exception) {
             null
         }
     }
 
-    /** 建立單一歌單（v1 / v2 共用）。name 缺失時回傳 [SKIP_SENTINEL] 表示跳過該筆。 */
-    private suspend fun importSinglePlaylist(playlistObj: JsonObject): Long {
-        val name = playlistObj["name"]?.jsonPrimitive?.content ?: return SKIP_SENTINEL
-        val itemsArray = playlistObj["items"]?.jsonArray ?: emptyList()
-        val playlistId = dao.insertPlaylist(PlaylistEntity(name = name))
-
-        itemsArray.forEach { element ->
-            val item = element.jsonObjectOrNull() ?: return@forEach
-            val videoId = item["videoId"]?.jsonPrimitive?.content ?: return@forEach
-            val title = item["title"]?.jsonPrimitive?.content ?: return@forEach
-            val thumbnailUrl = item["thumbnailUrl"]?.jsonPrimitive?.content ?: ""
-            val channel = item["channel"]?.jsonPrimitive?.contentOrNull ?: ""
-            val duration = item["duration"]?.jsonPrimitive?.contentOrNull
-
-            dao.insertItem(
-                PlaylistItemEntity(
-                    videoId = videoId,
-                    title = title,
-                    thumbnailUrl = thumbnailUrl,
-                    channel = channel,
-                    duration = duration,
-                    playlistId = playlistId
-                )
+    /** 解析 bundle 的 items 陣列：跳過缺 videoId/title 的無效項目。 */
+    private fun parseItems(elements: List<JsonElement>): List<PlaylistItemEntity> =
+        elements.mapNotNull { element ->
+            val item = element.jsonObjectOrNull() ?: return@mapNotNull null
+            val videoId = item["videoId"]?.jsonPrimitive?.content ?: return@mapNotNull null
+            val title = item["title"]?.jsonPrimitive?.content ?: return@mapNotNull null
+            PlaylistItemEntity(
+                videoId = videoId,
+                title = title,
+                thumbnailUrl = item["thumbnailUrl"]?.jsonPrimitive?.content ?: "",
+                channel = item["channel"]?.jsonPrimitive?.contentOrNull ?: "",
+                duration = item["duration"]?.jsonPrimitive?.contentOrNull,
+                playlistId = 0 // 佔位；建立歌單後以實際 id copy
             )
         }
-        return playlistId
+
+    private suspend fun insertItems(playlistId: Long, items: List<PlaylistItemEntity>) {
+        items.forEach { dao.insertItem(it.copy(playlistId = playlistId)) }
+    }
+
+    /**
+     * Replace 決策執行：交易性「刪除既有歌單＋其 items（沿用級聯刪除）→ 原名重建 → 寫入 items」。
+     * 中途任何失敗由 withTransaction 整體 rollback，不留半套狀態。
+     * @return 1 = 成功取代；0 = 理論上不發生的重建失敗（不產生孤兒項目）。
+     */
+    private suspend fun replacePlaylist(
+        existingId: Long,
+        name: String,
+        items: List<PlaylistItemEntity>
+    ): Int {
+        var newId = SKIP_SENTINEL
+        runInTransaction {
+            dao.deletePlaylistWithItemsCascade(existingId)
+            dao.deletePlaylist(existingId)
+            newId = dao.insertPlaylist(PlaylistEntity(name = name))
+            if (newId != SKIP_SENTINEL) {
+                insertItems(newId, items)
+            }
+        }
+        return if (newId != SKIP_SENTINEL) 1 else 0
+    }
+
+    /**
+     * KeepBoth 決策執行：尋找未使用的「原名 (n)」名稱（n 自 2 起）。
+     * 上限 [KEEP_BOTH_MAX_SUFFIX]，全滿回傳 null（跳過該筆）。
+     */
+    private suspend fun findAvailableKeepBothName(base: String): String? {
+        for (suffix in 2..KEEP_BOTH_MAX_SUFFIX) {
+            val candidate = "$base ($suffix)"
+            if (dao.findPlaylistIdByName(candidate) == null) return candidate
+        }
+        return null
     }
 
     private fun itemToJson(item: PlaylistItemEntity): JsonObject =
@@ -226,7 +370,13 @@ class PlaylistRepositoryImpl @Inject constructor(
         Instant.now().atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_INSTANT)
 
     private companion object {
-        /** importSinglePlaylist 的跳過哨兵：該筆（如缺 name）不匯入、不視為失敗。 */
+        /**
+         * insert 衝突哨兵：playlists.name 唯一索引在 insert（IGNORE）時回傳 -1——
+         * 代表「該筆名稱已存在」（含 bundle 內互撞），由匯入流程轉為衝突決策。
+         */
         const val SKIP_SENTINEL = -1L
+
+        /** KeepBoth 名稱後綴尋找上限（`name (2)`..`name (1000)`）；全滿視為極端案例跳過該筆。 */
+        const val KEEP_BOTH_MAX_SUFFIX = 1000
     }
 }

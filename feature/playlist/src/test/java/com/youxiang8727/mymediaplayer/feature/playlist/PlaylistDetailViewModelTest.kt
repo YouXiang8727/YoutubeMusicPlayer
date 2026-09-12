@@ -1,10 +1,13 @@
 package com.youxiang8727.mymediaplayer.feature.playlist
 
 import androidx.lifecycle.SavedStateHandle
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictDecision
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
 import com.youxiang8727.mymediaplayer.core.domain.model.PlayQueueItem
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaybackSnapshot
 import com.youxiang8727.mymediaplayer.core.domain.model.PlayerController
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
+import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistImportResult
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ClearPlaylistUseCase
@@ -83,7 +86,10 @@ class PlaylistDetailViewModelTest {
         override fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>> = flowOf(emptyList())
         override suspend fun exportPlaylistAsJson(playlistId: Long): String? = null
         override suspend fun exportAllPlaylistsAsJson(): String? = null
-        override suspend fun importPlaylistFromJson(json: String): Long? = null
+        override suspend fun importPlaylistFromJson(
+            json: String,
+            onConflict: suspend (info: ImportConflictInfo) -> ImportConflictDecision
+        ): PlaylistImportResult? = null
     }
 
     /** 記錄 playQueue（暫時性佇列）與 play（Room 路徑）的呼叫供斷言。 */

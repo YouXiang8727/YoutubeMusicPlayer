@@ -1,7 +1,10 @@
 package com.youxiang8727.mymediaplayer.feature.discover
 
 import com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictDecision
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
+import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistImportResult
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
@@ -15,6 +18,7 @@ import com.youxiang8727.mymediaplayer.core.domain.usecase.FetchRecommendationsUs
 import com.youxiang8727.mymediaplayer.core.domain.usecase.FetchTrendingSongsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObserveRecentPlaylistItemsUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.PlaylistNameConflictException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -82,7 +86,8 @@ class DiscoverViewModelTest {
     private class FakePlaylistRepository(
         initialPlaylists: List<Playlist> = emptyList(),
         initialRecentItems: List<PlaylistItem> = emptyList(),
-        var addItemError: Boolean = false
+        var addItemError: Boolean = false,
+        var createError: Exception? = null
     ) : PlaylistRepository {
         val playlistsFlow = MutableStateFlow(initialPlaylists)
         val recentItemsFlow = MutableStateFlow(initialRecentItems)
@@ -92,6 +97,7 @@ class DiscoverViewModelTest {
         override fun observeAllPlaylists(): Flow<List<Playlist>> = playlistsFlow
 
         override suspend fun createPlaylist(name: String): Long {
+            createError?.let { throw it }
             createdPlaylists += name
             return 1L
         }
@@ -119,7 +125,10 @@ class DiscoverViewModelTest {
 
         override suspend fun exportPlaylistAsJson(playlistId: Long): String? = null
         override suspend fun exportAllPlaylistsAsJson(): String? = null
-        override suspend fun importPlaylistFromJson(json: String): Long? = null
+        override suspend fun importPlaylistFromJson(
+            json: String,
+            onConflict: suspend (info: ImportConflictInfo) -> ImportConflictDecision
+        ): PlaylistImportResult? = null
     }
 
     /** 「為你推薦」資料源 Fake：記錄收到的種子與 limit 供斷言，結果可覆寫。 */
@@ -375,6 +384,23 @@ class DiscoverViewModelTest {
         // createPlaylist 已在加入前建立；加入失敗 → 失敗訊息
         assertEquals(listOf("我的最愛"), playlistRepo.createdPlaylists)
         assertTrue(h.messages.contains("建立失敗：add failed"))
+    }
+
+    @Test
+    fun `createPlaylistAndAdd 遇同名歌單發出衝突訊息且不加入任何歌曲`() {
+        // create 拋 PlaylistNameConflictException → 直接提示重名，addToPlaylist 不被呼叫
+        val repo = FakeVideoRepository()
+        val playlistRepo = FakePlaylistRepository(
+            createError = PlaylistNameConflictException("我的最愛")
+        )
+        val h = buildHarness(repo, playlistRepo)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        h.vm.createPlaylistAndAdd("我的最愛", v1)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(h.messages.contains("已存在同名歌單「我的最愛」"))
+        assertTrue("addToPlaylist 不應被呼叫", playlistRepo.addedItems.isEmpty())
     }
 
     // --- 「為你推薦」 ---

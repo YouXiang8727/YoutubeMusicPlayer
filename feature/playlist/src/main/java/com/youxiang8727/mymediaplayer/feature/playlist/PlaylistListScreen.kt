@@ -54,6 +54,8 @@ import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictDecision
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
 import java.text.SimpleDateFormat
@@ -65,11 +67,13 @@ import kotlinx.coroutines.launch
 @Composable
 fun PlaylistListScreen(
     state: PlaylistListUiState,
+    importConflict: ImportConflictInfo?,
     snackbarHostState: SnackbarHostState,
     onIntent: (PlaylistListIntent) -> Unit,
     onExport: (playlistId: Long) -> Unit,
     onExportAll: () -> Unit,
     onImport: () -> Unit,
+    onImportConflictDecision: (decision: ImportConflictDecision, applyToAll: Boolean) -> Unit,
     onOpenPlaylist: (playlistId: Long, name: String) -> Unit
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -144,20 +148,33 @@ fun PlaylistListScreen(
         // 建立新播放清單 Dialog
         if (showCreateDialog) {
             CreatePlaylistDialog(
+                existingNames = state.playlists.map { it.name }.toSet(),
                 onConfirm = { name -> onIntent(PlaylistListIntent.Create(name)) },
                 onDismiss = { showCreateDialog = false }
             )
         }
 
-        // 重新命名 Dialog
+        // 重新命名 Dialog（其他歌單名稱集合排除目前 id，允許改成自己目前名稱）
         showRenameDialog?.let { playlist ->
             RenamePlaylistDialog(
                 currentName = playlist.name,
+                otherNames = state.playlists
+                    .filter { it.id != playlist.id }
+                    .map { it.name }
+                    .toSet(),
                 onConfirm = { newName ->
                     onIntent(PlaylistListIntent.Rename(playlist.id, newName))
                     showRenameDialog = null
                 },
                 onDismiss = { showRenameDialog = null }
+            )
+        }
+
+        // 匯入名稱衝突 Dialog（置於 Scaffold 最上層，不被 Snackbar 遮擋）
+        importConflict?.let { info ->
+            ImportConflictDialog(
+                info = info,
+                onDecision = onImportConflictDecision
             )
         }
     }
@@ -242,10 +259,14 @@ private fun PlaylistListItem(
 @Composable
 private fun RenamePlaylistDialog(
     currentName: String,
+    otherNames: Set<String>,
     onConfirm: (newName: String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var name by remember { mutableStateOf(currentName) }
+    val trimmed = name.trim()
+    // 與「其他歌單」重名 → 即時防呆（改成自己目前名稱仍合法，不在此列）
+    val nameExists = trimmed.isNotBlank() && trimmed in otherNames
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("重新命名播放清單") },
@@ -254,13 +275,19 @@ private fun RenamePlaylistDialog(
                 value = name,
                 onValueChange = { name = it },
                 label = { Text("新名稱") },
-                singleLine = true
+                singleLine = true,
+                isError = nameExists,
+                supportingText = if (nameExists) {
+                    { Text("此名稱已存在") }
+                } else {
+                    null
+                }
             )
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(name.trim()); onDismiss() },
-                enabled = name.isNotBlank() && name.trim() != currentName
+                onClick = { onConfirm(trimmed); onDismiss() },
+                enabled = name.isNotBlank() && trimmed != currentName && !nameExists
             ) { Text("確認") }
         },
         dismissButton = {
@@ -276,6 +303,7 @@ fun PlaylistListRoute(
     onOpenPlaylist: (playlistId: Long, name: String) -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val importConflict by viewModel.importConflict.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -342,6 +370,7 @@ fun PlaylistListRoute(
 
     PlaylistListScreen(
         state = state,
+        importConflict = importConflict,
         snackbarHostState = snackbarHostState,
         onIntent = viewModel::onIntent,
         onExport = { id ->
@@ -355,6 +384,7 @@ fun PlaylistListRoute(
             viewModel.onIntent(PlaylistListIntent.ExportAll)
         },
         onImport = { importLauncher.launch("application/json") },
+        onImportConflictDecision = viewModel::onImportConflictDecision,
         onOpenPlaylist = onOpenPlaylist
     )
 }
@@ -433,11 +463,13 @@ private fun PlaylistListScreenEmptyPreview() {
     MyMediaPlayerTheme {
         PlaylistListScreen(
             state = PlaylistListUiState(playlists = emptyList(), isLoading = false),
+            importConflict = null,
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onExport = {},
             onExportAll = {},
             onImport = {},
+            onImportConflictDecision = { _, _ -> },
             onOpenPlaylist = { _, _ -> }
         )
     }
@@ -474,10 +506,12 @@ private fun PlaylistListScreenItemsPreview() {
                 )
             ),
             snackbarHostState = remember { SnackbarHostState() },
+            importConflict = null,
             onIntent = {},
             onExport = {},
             onExportAll = {},
             onImport = {},
+            onImportConflictDecision = { _, _ -> },
             onOpenPlaylist = { _, _ -> }
         )
     }

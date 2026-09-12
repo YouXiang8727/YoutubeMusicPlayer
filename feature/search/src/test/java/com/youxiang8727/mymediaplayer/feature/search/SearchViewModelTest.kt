@@ -1,6 +1,9 @@
 package com.youxiang8727.mymediaplayer.feature.search
 
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictDecision
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
+import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistImportResult
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
@@ -14,6 +17,7 @@ import com.youxiang8727.mymediaplayer.core.domain.usecase.ClearSearchHistoryUseC
 import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObserveSearchHistoryUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.PlaylistNameConflictException
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchSuggestionsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchVideosUseCase
 import kotlinx.coroutines.CoroutineScope
@@ -72,13 +76,27 @@ class SearchViewModelTest {
             Result.success(emptyList())
     }
 
-    private object EmptyPlaylistRepository : PlaylistRepository {
+    /**
+     * 播放清單 Fake：可覆寫 [createError] 模擬建立重名衝突；記錄建立與加入呼叫供斷言。
+     */
+    private class FakePlaylistRepository(
+        var createError: Exception? = null
+    ) : PlaylistRepository {
+        val createdPlaylists = mutableListOf<String>()
+        val addedItems = mutableListOf<Pair<Long, PlaylistItem>>()
+
         override fun observeAllPlaylists(): Flow<List<Playlist>> = emptyFlow()
-        override suspend fun createPlaylist(name: String): Long = 1L
+        override suspend fun createPlaylist(name: String): Long {
+            createError?.let { throw it }
+            createdPlaylists += name
+            return 1L
+        }
         override suspend fun renamePlaylist(playlistId: Long, newName: String) {}
         override suspend fun deletePlaylist(playlistId: Long) {}
         override fun observePlaylistItems(playlistId: Long): Flow<List<PlaylistItem>> = emptyFlow()
-        override suspend fun addItem(playlistId: Long, item: PlaylistItem) {}
+        override suspend fun addItem(playlistId: Long, item: PlaylistItem) {
+            addedItems += (playlistId to item)
+        }
         override suspend fun removeItem(playlistId: Long, videoId: String) {}
         override suspend fun clearPlaylist(playlistId: Long) {}
         override suspend fun getRandomItem(playlistId: Long): PlaylistItem? = null
@@ -87,7 +105,10 @@ class SearchViewModelTest {
         override fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>> = emptyFlow()
         override suspend fun exportPlaylistAsJson(playlistId: Long): String? = null
         override suspend fun exportAllPlaylistsAsJson(): String? = null
-        override suspend fun importPlaylistFromJson(json: String): Long? = null
+        override suspend fun importPlaylistFromJson(
+            json: String,
+            onConflict: suspend (info: ImportConflictInfo) -> ImportConflictDecision
+        ): PlaylistImportResult? = null
     }
 
     /**
@@ -155,13 +176,14 @@ class SearchViewModelTest {
     private fun buildHarness(
         repo: FakeVideoRepository = FakeVideoRepository(),
         suggestionRepo: FakeSuggestionRepository = FakeSuggestionRepository(),
-        historyRepo: FakeSearchHistoryRepository = FakeSearchHistoryRepository()
+        historyRepo: FakeSearchHistoryRepository = FakeSearchHistoryRepository(),
+        playlistRepo: FakePlaylistRepository = FakePlaylistRepository()
     ): Harness {
         val vm = SearchViewModel(
             searchVideos = SearchVideosUseCase(repo),
-            addToPlaylist = AddToPlaylistUseCase(EmptyPlaylistRepository),
-            createPlaylist = CreatePlaylistUseCase(EmptyPlaylistRepository),
-            observePlaylists = ObservePlaylistsUseCase(EmptyPlaylistRepository),
+            addToPlaylist = AddToPlaylistUseCase(playlistRepo),
+            createPlaylist = CreatePlaylistUseCase(playlistRepo),
+            observePlaylists = ObservePlaylistsUseCase(playlistRepo),
             searchSuggestions = SearchSuggestionsUseCase(suggestionRepo),
             observeSearchHistory = ObserveSearchHistoryUseCase(historyRepo),
             addSearchHistory = AddSearchHistoryUseCase(historyRepo),
@@ -603,5 +625,23 @@ class SearchViewModelTest {
         assertTrue(h.vm.state.value.suggestions.isEmpty())
         assertEquals(listOf(v1), h.vm.state.value.results)
         assertTrue(h.vm.state.value.searched)
+    }
+
+    // ==================== createPlaylistAndAdd（重名防呆） ====================
+
+    @Test
+    fun `createPlaylistAndAdd 遇同名歌單發出衝突訊息且不加入任何歌曲`() {
+        // create 拋 PlaylistNameConflictException → 直接提示重名，addToPlaylist 不被呼叫
+        val playlistRepo = FakePlaylistRepository(
+            createError = PlaylistNameConflictException("我的最愛")
+        )
+        val h = buildHarness(playlistRepo = playlistRepo)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        h.vm.createPlaylistAndAdd("我的最愛", v1)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(h.messages.contains("已存在同名歌單「我的最愛」"))
+        assertTrue("addToPlaylist 不應被呼叫", playlistRepo.addedItems.isEmpty())
     }
 }

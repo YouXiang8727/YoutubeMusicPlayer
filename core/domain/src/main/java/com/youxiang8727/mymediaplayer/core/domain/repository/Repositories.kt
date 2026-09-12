@@ -1,7 +1,10 @@
 package com.youxiang8727.mymediaplayer.core.domain.repository
 
 import com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictDecision
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
+import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistImportResult
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
@@ -63,11 +66,25 @@ interface PlaylistRepository {
     /**
      * Import playlist(s) from JSON string. Accepts both formats：
      * - v1（單一）：root 含 `playlist` 鍵 → 匯入一個歌單
-     * - v2（bundle）：root 含 `playlists` 鍵（陣列）→ 依序匯入多個歌單，逐筆跳過無效項目
+     * - v2（bundle）：root 含 `playlists` 鍵（陣列）→ 依序匯入多個歌單
      *
-     * @return 第一個成功建立的歌單 ID；全部失敗或結構無效時回傳 null。
+     * 匯入流程採**衝突詢問制**：當某筆歌單名稱與既有歌單重名時，流程**暫停等待**
+     * [onConflict] 回傳決策（[ImportConflictDecision]）：
+     * - Replace：刪除既有歌單（含其項目）並以原名交易性重建
+     * - KeepBoth：以「原名 (2)」「原名 (3)」...尋找未使用名稱建立
+     * - Cancel：中止後續所有歌單處理，先前已匯入者保留
+     *
+     * [onConflict] 只在該筆歌單名稱與既有歌單衝突時被呼叫；呼叫時 import 流程
+     * 暫停等待決策。未勾選「全部套用」時 UI 應逐個詢問；[ImportConflictInfo.conflictIndex]
+     * 為 1-based 依處理順序遞增、[ImportConflictInfo.totalConflicts] 為匯入前預掃到的衝突總數。
+     *
+     * @param onConflict 衝突決策 callback（suspend，流程暫停等待回傳）
+     * @return null = JSON 結構無法辨識；否則回傳匯入結果統計（即使中途取消亦非 null）。
      */
-    suspend fun importPlaylistFromJson(json: String): Long?
+    suspend fun importPlaylistFromJson(
+        json: String,
+        onConflict: suspend (info: ImportConflictInfo) -> ImportConflictDecision
+    ): PlaylistImportResult?
 }
 
 /**

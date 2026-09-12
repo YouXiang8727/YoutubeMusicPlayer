@@ -1,10 +1,15 @@
 package com.youxiang8727.mymediaplayer.core.data.repository
 
+import android.database.sqlite.SQLiteConstraintException
 import com.youxiang8727.mymediaplayer.core.data.local.PlaylistDao
 import com.youxiang8727.mymediaplayer.core.data.local.PlaylistEntity
 import com.youxiang8727.mymediaplayer.core.data.local.PlaylistItemEntity
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictDecision
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
+import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistImportResult
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
+import com.youxiang8727.mymediaplayer.core.domain.usecase.PlaylistNameConflictException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -31,6 +36,9 @@ class PlaylistRepositoryImplTest {
     private class FakePlaylistDao : PlaylistDao {
         val playlistTable = MutableStateFlow<List<PlaylistEntity>>(emptyList())
         val itemTable = MutableStateFlow<List<PlaylistItemEntity>>(emptyList())
+
+        /** true 時 updatePlaylist 一律拋 [SQLiteConstraintException]——模擬 pre-check 與 UPDATE 之間的 race。 */
+        var forceRenameConstraintThrow = false
         private var nextId = 1L
 
         override fun observeAllPlaylists(): Flow<List<PlaylistEntity>> = playlistTable.map { rows ->
@@ -38,16 +46,28 @@ class PlaylistRepositoryImplTest {
         }
 
         override suspend fun insertPlaylist(entity: PlaylistEntity): Long {
+            // 模擬 playlists.name UNIQUE INDEX：重名時 IGNORE 回傳 -1（Room 真實行為）
+            val duplicated = playlistTable.value.any { it.name == entity.name }
+            if (duplicated) return -1L
             val id = nextId++
             playlistTable.value = playlistTable.value + entity.copy(id = id)
             return id
         }
 
         override suspend fun updatePlaylist(id: Long, name: String, updatedAt: Long) {
+            if (forceRenameConstraintThrow) {
+                throw SQLiteConstraintException("UNIQUE constraint failed: playlists.name")
+            }
+            // 模擬唯一約束：改名與「其他」歌單撞名時 SQLite 拋約束例外
+            val conflict = playlistTable.value.any { it.id != id && it.name == name }
+            if (conflict) throw SQLiteConstraintException("UNIQUE constraint failed: playlists.name")
             playlistTable.value = playlistTable.value.map {
                 if (it.id == id) it.copy(name = name, updatedAt = updatedAt) else it
             }
         }
+
+        override suspend fun findPlaylistIdByName(name: String): Long? =
+            playlistTable.value.firstOrNull { it.name == name }?.id
 
         override suspend fun deletePlaylist(id: Long) {
             playlistTable.value = playlistTable.value.filterNot { it.id == id }
@@ -162,6 +182,283 @@ class PlaylistRepositoryImplTest {
 
         val playlists = repository.observeAllPlaylists().first()
         assertEquals("新名", playlists.first { it.id == id }.name)
+    }
+
+    // ── 歌單名稱防呆（name 唯一索引）──
+
+    @Test
+    fun `createPlaylist 重名時拋 PlaylistNameConflictException`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val id = repository.createPlaylist("我的最愛")
+        assertTrue(id > 0)
+
+        val conflict = runCatching { repository.createPlaylist("我的最愛") }
+            .exceptionOrNull() as? PlaylistNameConflictException
+        assertNotNull(conflict)
+        // message 為可直接顯示給使用者的中文訊息
+        assertEquals("已存在同名歌單「我的最愛」", conflict!!.message)
+        assertEquals("我的最愛", conflict.name)
+        // 既有歌單不受影響、未新增重名歌單
+        assertEquals(1, repository.observeAllPlaylists().first().size)
+    }
+
+    @Test
+    fun `renamePlaylist 改成他人已用名稱時拋 PlaylistNameConflictException`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val idA = repository.createPlaylist("清單A")
+        repository.createPlaylist("清單B")
+
+        val conflict = runCatching { repository.renamePlaylist(idA, "清單B") }
+            .exceptionOrNull() as? PlaylistNameConflictException
+        assertNotNull(conflict)
+        assertEquals("已存在同名歌單「清單B」", conflict!!.message)
+        // A 名稱不變
+        assertEquals("清單A", repository.observeAllPlaylists().first().first { it.id == idA }.name)
+    }
+
+    @Test
+    fun `renamePlaylist 改成自己目前名稱直接成功`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val id = repository.createPlaylist("我的最愛")
+
+        repository.renamePlaylist(id, "我的最愛") // 不拋例外
+
+        val playlists = repository.observeAllPlaylists().first()
+        assertEquals(1, playlists.size)
+        assertEquals("我的最愛", playlists.single().name)
+    }
+
+    @Test
+    fun `renamePlaylist 前置檢查通過但寫入撞唯一約束時仍拋 PlaylistNameConflictException（雙保險）`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val id = repository.createPlaylist("清單A")
+
+        // 模擬 pre-check 與 UPDATE 之間的 race：查詢時名稱未被使用，但 SQLite 唯一索引仍擋下重名
+        dao.forceRenameConstraintThrow = true
+        val conflict = runCatching { repository.renamePlaylist(id, "清單B") }
+            .exceptionOrNull() as? PlaylistNameConflictException
+        assertNotNull(conflict)
+        assertEquals("已存在同名歌單「清單B」", conflict!!.message)
+    }
+
+    // ── 匯入 v2 bundle：衝突詢問制（onConflict callback）──
+
+    private fun v2Json(vararg playlists: String): String =
+        """
+        {
+          "version": 2,
+          "exportedAt": "2026-01-01T00:00:00Z",
+          "playlists": [
+            ${playlists.joinToString(",\n            ")}
+          ]
+        }
+        """.trimIndent()
+
+    @Test
+    fun `importPlaylistFromJson v2 無衝突 bundle 全數建立且不呼叫 onConflict`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+        val conflictCalls = mutableListOf<ImportConflictInfo>()
+
+        val json = """
+            {
+              "version": 2,
+              "exportedAt": "2026-01-01T00:00:00Z",
+              "playlists": [
+                { "name": "匯入A", "items": [ { "videoId": "vA", "title": "TA" } ] },
+                { "name": "匯入B", "items": [] }
+              ]
+            }
+        """.trimIndent()
+
+        val result = repository.importPlaylistFromJson(json) { conflictCalls += it; ImportConflictDecision.Cancel }
+
+        assertEquals(PlaylistImportResult(created = 2, replaced = 0, keptBoth = 0, cancelled = false), result)
+        assertTrue(conflictCalls.isEmpty())
+        assertEquals(setOf("匯入A", "匯入B"), repository.observeAllPlaylists().first().map { it.name }.toSet())
+        assertEquals(setOf("vA"), dao.itemTable.value.map { it.videoId }.toSet())
+    }
+
+    @Test
+    fun `importPlaylistFromJson v2 遇重名時詢問決策且 KeepBoth 保留兩者`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val existingId = repository.createPlaylist("重名歌單")
+        assertTrue(existingId > 0)
+        val conflictCalls = mutableListOf<ImportConflictInfo>()
+
+        val json = v2Json(
+            """{ "name": "重名歌單", "items": [ { "videoId": "vDup", "title": "TDup" } ] }""",
+            """{ "name": "新歌單", "items": [ { "videoId": "vNew", "title": "TNew" } ] }"""
+        )
+
+        val result = repository.importPlaylistFromJson(json) { info ->
+            conflictCalls += info
+            ImportConflictDecision.KeepBoth
+        }
+
+        assertEquals(PlaylistImportResult(created = 1, replaced = 0, keptBoth = 1, cancelled = false), result)
+
+        // 衝突資訊正確：該衝突為第 1 / 共 1
+        assertEquals(1, conflictCalls.size)
+        assertEquals("重名歌單", conflictCalls.single().name)
+        assertEquals(1, conflictCalls.single().conflictIndex)
+        assertEquals(1, conflictCalls.single().totalConflicts)
+
+        // 既有歌單保留、新歌單為「原名 (2)」，兩者並存
+        val playlists = repository.observeAllPlaylists().first()
+        assertEquals(setOf("重名歌單", "重名歌單 (2)", "新歌單"), playlists.map { it.name }.toSet())
+        assertEquals(existingId, playlists.first { it.name == "重名歌單" }.id)
+        assertTrue(playlists.first { it.name == "重名歌單 (2)" }.id > 0)
+
+        // 新增歌單的項目寫入正確、沒有孤兒項目
+        val keptId = playlists.first { it.name == "重名歌單 (2)" }.id
+        assertEquals(setOf("vDup"), dao.itemTable.value.filter { it.playlistId == keptId }.map { it.videoId }.toSet())
+        assertTrue(dao.itemTable.value.none { it.playlistId == -1L })
+    }
+
+    @Test
+    fun `importPlaylistFromJson 單一衝突 Replace 交易性重建既有歌單與項目`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val existingId = repository.createPlaylist("取代清單")
+        repository.addItem(existingId, item("vOld", playlistId = existingId))
+
+        val json = v2Json("""{ "name": "取代清單", "items": [ { "videoId": "vNew", "title": "TNew" } ] }""")
+
+        val result = repository.importPlaylistFromJson(json) { ImportConflictDecision.Replace }
+
+        assertEquals(PlaylistImportResult(created = 0, replaced = 1, keptBoth = 0, cancelled = false), result)
+
+        // 既有 items 被清空重建：只剩新項目、不殘留舊項目、無孤兒
+        val playlists = repository.observeAllPlaylists().first()
+        assertEquals(setOf("取代清單"), playlists.map { it.name }.toSet())
+        val newId = playlists.single().id
+        assertEquals(setOf("vNew"), dao.itemTable.value.filter { it.playlistId == newId }.map { it.videoId }.toSet())
+        assertTrue(dao.itemTable.value.none { it.playlistId == -1L })
+    }
+
+    @Test
+    fun `importPlaylistFromJson 單一衝突 KeepBoth 名稱後綴跳過已被使用之編號`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        repository.createPlaylist("同名")
+        repository.createPlaylist("同名 (2)") // (2) 已被既有歌單使用 → 應選 (3)
+
+        val json = v2Json("""{ "name": "同名", "items": [ { "videoId": "v1", "title": "T1" } ] }""")
+
+        val result = repository.importPlaylistFromJson(json) { ImportConflictDecision.KeepBoth }
+
+        assertEquals(PlaylistImportResult(created = 0, replaced = 0, keptBoth = 1, cancelled = false), result)
+        val names = repository.observeAllPlaylists().first().map { it.name }.toSet()
+        assertEquals(setOf("同名", "同名 (2)", "同名 (3)"), names)
+    }
+
+    @Test
+    fun `importPlaylistFromJson 多衝突時 conflictIndex 與 totalConflicts 依序正確傳入`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        repository.createPlaylist("既有A")
+        repository.createPlaylist("既有B")
+        val conflictInfos = mutableListOf<ImportConflictInfo>()
+
+        val json = v2Json(
+            """{ "name": "既有A", "items": [] }""",
+            """{ "name": "既有B", "items": [] }""",
+            """{ "name": "新C", "items": [] }"""
+        )
+
+        val result = repository.importPlaylistFromJson(json) { info ->
+            conflictInfos += info
+            ImportConflictDecision.Replace
+        }
+
+        // 預掃衝突總數 = 2（既有A、既有B 與初始快照重疊）；依序處理 conflictIndex = 1、2
+        assertEquals(listOf("既有A", "既有B"), conflictInfos.map { it.name })
+        assertEquals(listOf(1, 2), conflictInfos.map { it.conflictIndex })
+        assertTrue(conflictInfos.all { it.totalConflicts == 2 })
+
+        // 兩筆取代 + 一筆建立
+        assertEquals(PlaylistImportResult(created = 1, replaced = 2, keptBoth = 0, cancelled = false), result)
+    }
+
+    @Test
+    fun `importPlaylistFromJson 中途 Cancel 中止後續且先前已匯入保留`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        repository.createPlaylist("衝突清單")
+
+        val json = v2Json(
+            """{ "name": "先匯入", "items": [ { "videoId": "v1", "title": "T1" } ] }""",
+            """{ "name": "衝突清單", "items": [] }""",
+            """{ "name": "後續不匯入", "items": [] }"""
+        )
+
+        val result = repository.importPlaylistFromJson(json) { ImportConflictDecision.Cancel }
+
+        assertEquals(PlaylistImportResult(created = 1, replaced = 0, keptBoth = 0, cancelled = true), result)
+
+        // 「先匯入」保留；「後續不匯入」未被處理
+        val names = repository.observeAllPlaylists().first().map { it.name }.toSet()
+        assertEquals(setOf("衝突清單", "先匯入"), names)
+    }
+
+    @Test
+    fun `importPlaylistFromJson v2 全部項目無效時回傳全零結果非 null`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val json = v2Json("""{ "items": [] }""", """{ "items": [] }""")
+
+        val result = repository.importPlaylistFromJson(json) { ImportConflictDecision.Cancel }
+
+        // 結構可辨識（playlists 鍵存在）→ 非 null；缺 name 項目靜默跳過
+        assertEquals(PlaylistImportResult(created = 0, replaced = 0, keptBoth = 0, cancelled = false), result)
+        assertTrue(dao.playlistTable.value.isEmpty())
+    }
+
+    @Test
+    fun `importPlaylistFromJson 邊角 bundle 內同名仍走 onConflict 且不產生孤兒項目`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+        val conflictInfos = mutableListOf<ImportConflictInfo>()
+
+        // 空資料庫：bundle 內兩個同名「重複」——第二次 insert 撞唯一索引回 -1
+        val json = v2Json(
+            """{ "name": "重複", "items": [ { "videoId": "v1", "title": "T1" } ] }""",
+            """{ "name": "重複", "items": [ { "videoId": "v2", "title": "T2" } ] }"""
+        )
+
+        val result = repository.importPlaylistFromJson(json) { info ->
+            conflictInfos += info
+            ImportConflictDecision.KeepBoth
+        }
+
+        // 第一次建立成功、第二次撞 -1 → 仍走 onConflict 決策（KeepBoth）
+        assertEquals(PlaylistImportResult(created = 1, replaced = 0, keptBoth = 1, cancelled = false), result)
+        assertTrue(conflictInfos.isNotEmpty())
+
+        // 二者並存：原名 + 原名 (2)，項目各自寫入、無孤兒
+        val playlists = repository.observeAllPlaylists().first()
+        assertEquals(setOf("重複", "重複 (2)"), playlists.map { it.name }.toSet())
+        val firstId = playlists.first { it.name == "重複" }.id
+        val secondId = playlists.first { it.name == "重複 (2)" }.id
+        assertEquals(setOf("v1"), dao.itemTable.value.filter { it.playlistId == firstId }.map { it.videoId }.toSet())
+        assertEquals(setOf("v2"), dao.itemTable.value.filter { it.playlistId == secondId }.map { it.videoId }.toSet())
+        assertTrue(dao.itemTable.value.none { it.playlistId == -1L })
     }
 
     @Test
@@ -437,17 +734,16 @@ class PlaylistRepositoryImplTest {
             }
         """.trimIndent()
 
-        val firstId = repository.importPlaylistFromJson(json)
+        val result = repository.importPlaylistFromJson(json) { ImportConflictDecision.Cancel }
 
-        assertNotNull(firstId)
+        assertNotNull(result)
+        assertEquals(PlaylistImportResult(created = 2, replaced = 0, keptBoth = 0, cancelled = false), result)
         // 缺 name 的第三筆被跳過（未匯入）
         val playlists = repository.observeAllPlaylists().first()
         assertEquals(setOf("匯入A", "匯入B"), playlists.map { it.name }.toSet())
         assertEquals(2, playlists.size)
 
-        // 第一個回傳 ID = 第一個成功建立的歌單（匯入A）
         val aPlaylistId = playlists.first { it.name == "匯入A" }.id
-        assertEquals(aPlaylistId, firstId)
 
         val aItems = dao.itemTable.value.filter { it.playlistId == aPlaylistId }
         assertEquals(setOf("vA1", "vA2"), aItems.map { it.videoId }.toSet())
@@ -461,31 +757,12 @@ class PlaylistRepositoryImplTest {
     }
 
     @Test
-    fun `importPlaylistFromJson v2 全部項目無效時回傳 null`() = runTest {
-        val dao = FakePlaylistDao()
-        val repository = PlaylistRepositoryImpl(dao)
-
-        val json = """
-            {
-              "version": 2,
-              "exportedAt": "2026-01-01T00:00:00Z",
-              "playlists": [
-                { "items": [] },
-                { "items": [] }
-              ]
-            }
-        """.trimIndent()
-
-        assertNull(repository.importPlaylistFromJson(json))
-        assertTrue(dao.playlistTable.value.isEmpty())
-    }
-
-    @Test
     fun `importPlaylistFromJson 結構無效（無 playlist 也無 playlists）回傳 null`() = runTest {
         val dao = FakePlaylistDao()
         val repository = PlaylistRepositoryImpl(dao)
 
-        assertNull(repository.importPlaylistFromJson("""{"version":99}"""))
+        assertNull(repository.importPlaylistFromJson("""{"version":99}""") { ImportConflictDecision.Cancel })
+        assertNull(repository.importPlaylistFromJson("not a json") { ImportConflictDecision.Cancel })
         assertTrue(dao.playlistTable.value.isEmpty())
     }
 
@@ -510,12 +787,12 @@ class PlaylistRepositoryImplTest {
             }
         """.trimIndent()
 
-        val id = repository.importPlaylistFromJson(json)
+        val result = repository.importPlaylistFromJson(json) { ImportConflictDecision.Cancel }
 
-        assertNotNull(id)
+        assertEquals(PlaylistImportResult(created = 1, replaced = 0, keptBoth = 0, cancelled = false), result)
         val playlists = repository.observeAllPlaylists().first()
         assertEquals(listOf("舊版歌單"), playlists.map { it.name })
-        assertEquals(id, playlists.single().id)
+        val id = playlists.single().id
 
         val items = dao.itemTable.value.filter { it.playlistId == id }
         assertEquals(setOf("v1", "v2"), items.map { it.videoId }.toSet())
