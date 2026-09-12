@@ -231,6 +231,7 @@ fun SearchScreen(
     // 建立新播放清單 Dialog（獨立於 BottomSheet，生命週期不受影響）
     if (showCreateDialog) {
         CreatePlaylistDialog(
+            existingNames = playlists.map { it.name }.toSet(),
             onConfirm = { name ->
                 pendingCreateVideo?.let { video ->
                     onCreatePlaylistAndAdd(name, video)

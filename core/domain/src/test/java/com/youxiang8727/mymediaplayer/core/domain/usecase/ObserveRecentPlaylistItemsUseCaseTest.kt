@@ -1,6 +1,9 @@
 package com.youxiang8727.mymediaplayer.core.domain.usecase
 
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictDecision
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
+import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistImportResult
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
 import kotlinx.coroutines.flow.Flow
@@ -54,7 +57,10 @@ class ObserveRecentPlaylistItemsUseCaseTest {
 
         override suspend fun exportAllPlaylistsAsJson(): String? = null
 
-        override suspend fun importPlaylistFromJson(json: String): Long? = null
+        override suspend fun importPlaylistFromJson(
+            json: String,
+            onConflict: suspend (info: ImportConflictInfo) -> ImportConflictDecision
+        ): PlaylistImportResult? = null
     }
 
     private fun item(videoId: String, playlistId: Long = 1L) = PlaylistItem(

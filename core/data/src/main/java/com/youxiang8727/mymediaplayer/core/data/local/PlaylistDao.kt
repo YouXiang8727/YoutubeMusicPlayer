@@ -19,6 +19,13 @@ interface PlaylistDao {
     @Query("UPDATE playlists SET name = :name, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updatePlaylist(id: Long, name: String, updatedAt: Long)
 
+    /**
+     * 依名稱查詢歌單 id（name 具唯一索引後最多一筆；供重新命名前置檢查）。
+     * 回傳 null = 無任何歌單使用該名稱。
+     */
+    @Query("SELECT id FROM playlists WHERE name = :name LIMIT 1")
+    suspend fun findPlaylistIdByName(name: String): Long?
+
     @Query("DELETE FROM playlists WHERE id = :id")
     suspend fun deletePlaylist(id: Long)
 

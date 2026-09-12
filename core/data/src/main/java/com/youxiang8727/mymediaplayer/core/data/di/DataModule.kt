@@ -73,6 +73,49 @@ object DatabaseModule {
         }
     }
 
+    /**
+     * v5 → v6：playlists.name 建立唯一索引（歌單名稱防呆）。
+     *
+     * 既有資料可能已有重複名稱，直接建唯一索引會失敗，故先歸一去重：
+     * 每組重複名稱保留 **id 最小** 的一筆，其餘改名（後綴含原 id），
+     * 改名結果會確保不與任何既有/已指派名稱重複（撞名時再加 `-N` 後綴）。
+     * 不刪除任何歌單、不失敗。最後建立唯一索引（名稱與 Room 依 Entity
+     * `Index(value=["name"], unique=true)` 自動推導的 `index_playlists_name` 一致）。
+     */
+    private val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            val rows = mutableListOf<Pair<Long, String>>() // id → name
+            db.query("SELECT id, name FROM playlists").use { cursor ->
+                while (cursor.moveToNext()) {
+                    rows.add(cursor.getLong(0) to cursor.getString(1))
+                }
+            }
+            if (rows.isNotEmpty()) {
+                val usedNames = rows.map { it.second }.toMutableSet()
+                // 每組名稱保留 id 最小的一筆：其餘（minId 不等於自己）才需要改名
+                val minIdByName = rows.groupBy { it.second }
+                    .mapValues { (_, group) -> group.minOf { it.first } }
+                rows.forEach { (id, name) ->
+                    val minId = minIdByName.getValue(name)
+                    if (minId != id) {
+                        var candidate = "$name (重複 $id)"
+                        var suffix = 2
+                        while (candidate in usedNames) {
+                            candidate = "$name (重複 $id-$suffix)"
+                            suffix++
+                        }
+                        usedNames += candidate
+                        db.execSQL(
+                            "UPDATE playlists SET name = ? WHERE id = ?",
+                            arrayOf<Any>(candidate, id)
+                        )
+                    }
+                }
+            }
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_playlists_name ON playlists(name)")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
@@ -80,7 +123,7 @@ object DatabaseModule {
             context.applicationContext,
             AppDatabase::class.java,
             "mymediaplayer.db"
-        ).addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+        ).addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .fallbackToDestructiveMigration()  // 對不可預期版本仍是防禦
             .build()
     }

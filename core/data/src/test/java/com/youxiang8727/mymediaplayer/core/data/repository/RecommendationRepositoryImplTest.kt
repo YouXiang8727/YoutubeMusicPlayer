@@ -2,7 +2,10 @@ package com.youxiang8727.mymediaplayer.core.data.repository
 
 import com.youxiang8727.mymediaplayer.core.common.DefaultDispatcherProvider
 import com.youxiang8727.mymediaplayer.core.data.remote.RelatedStreamsDataSource
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictDecision
+import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
+import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistImportResult
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
@@ -74,7 +77,10 @@ class RecommendationRepositoryImplTest {
 
         override suspend fun exportAllPlaylistsAsJson(): String? = null
 
-        override suspend fun importPlaylistFromJson(json: String): Long? = null
+        override suspend fun importPlaylistFromJson(
+            json: String,
+            onConflict: suspend (info: ImportConflictInfo) -> ImportConflictDecision
+        ): PlaylistImportResult? = null
     }
 
     private fun seed(videoId: String) = PlaylistItem(

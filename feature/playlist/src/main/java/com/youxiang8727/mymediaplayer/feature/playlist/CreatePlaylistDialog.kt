@@ -15,14 +15,19 @@ import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
 
 /**
  * 建立新播放清單的 Dialog。
- * [onConfirm] 回傳使用者輸入的名稱；[onDismiss] 關閉。
+ * [onConfirm] 回傳使用者輸入的名稱（trim 後）；[onDismiss] 關閉。
+ * [existingNames] 為既有歌單名稱（已 trim）集合——輸入名稱與其重複時
+ * 確認鈕 disabled 並以 isError＋supportingText「此名稱已存在」即時提示。
  */
 @Composable
 fun CreatePlaylistDialog(
+    existingNames: Set<String>,
     onConfirm: (name: String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var name by remember { mutableStateOf("") }
+    val trimmed = name.trim()
+    val nameExists = trimmed.isNotBlank() && trimmed in existingNames
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("建立新播放清單") },
@@ -31,13 +36,19 @@ fun CreatePlaylistDialog(
                 value = name,
                 onValueChange = { name = it },
                 label = { Text("清單名稱") },
-                singleLine = true
+                singleLine = true,
+                isError = nameExists,
+                supportingText = if (nameExists) {
+                    { Text("此名稱已存在") }
+                } else {
+                    null
+                }
             )
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(name.trim()); onDismiss() },
-                enabled = name.isNotBlank()
+                onClick = { onConfirm(trimmed); onDismiss() },
+                enabled = !nameExists && name.isNotBlank()
             ) { Text("建立") }
         },
         dismissButton = {
@@ -68,6 +79,7 @@ fun CreatePlaylistDialog(
 private fun CreatePlaylistDialogPreview() {
     MyMediaPlayerTheme {
         CreatePlaylistDialog(
+            existingNames = setOf("我的最愛", "工作播放清單"),
             onConfirm = {},
             onDismiss = {}
         )

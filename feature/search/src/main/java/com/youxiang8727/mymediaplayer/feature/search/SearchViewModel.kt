@@ -10,6 +10,7 @@ import com.youxiang8727.mymediaplayer.core.domain.usecase.ClearSearchHistoryUseC
 import com.youxiang8727.mymediaplayer.core.domain.usecase.CreatePlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObservePlaylistsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ObserveSearchHistoryUseCase
+import com.youxiang8727.mymediaplayer.core.domain.usecase.PlaylistNameConflictException
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchSuggestionsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchVideosUseCase
 import android.util.Log
@@ -296,7 +297,14 @@ class SearchViewModel @Inject constructor(
                 addToPlaylist(newId, video.toPlaylistItem(newId))
             }
                 .onSuccess { _messages.tryEmit("已建立「$name」並加入歌曲") }
-                .onFailure { _messages.tryEmit("建立失敗：${it.message}") }
+                .onFailure { e ->
+                    if (e is PlaylistNameConflictException) {
+                        // 重名為資料層可預期之結果：直接提示（例外在 addToPlaylist 前拋出，不會以 -1 加入）
+                        _messages.tryEmit(e.message ?: "已存在同名歌單")
+                    } else {
+                        _messages.tryEmit("建立失敗：${e.message}")
+                    }
+                }
         }
     }
 }
