@@ -118,6 +118,7 @@ class DiscoverViewModelTest {
         override fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>> = recentItemsFlow
 
         override suspend fun exportPlaylistAsJson(playlistId: Long): String? = null
+        override suspend fun exportAllPlaylistsAsJson(): String? = null
         override suspend fun importPlaylistFromJson(json: String): Long? = null
     }
 

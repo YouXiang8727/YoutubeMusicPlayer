@@ -102,6 +102,13 @@ class ExportPlaylistUseCase @Inject constructor(
         repository.exportPlaylistAsJson(playlistId)
 }
 
+class ExportAllPlaylistsUseCase @Inject constructor(
+    private val repository: PlaylistRepository
+) {
+    /** Export all playlists to a single JSON string. null if no playlists exist. */
+    suspend operator fun invoke(): String? = repository.exportAllPlaylistsAsJson()
+}
+
 class ImportPlaylistUseCase @Inject constructor(
     private val repository: PlaylistRepository
 ) {

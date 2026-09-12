@@ -72,6 +72,8 @@ class RecommendationRepositoryImplTest {
 
         override suspend fun exportPlaylistAsJson(playlistId: Long): String? = null
 
+        override suspend fun exportAllPlaylistsAsJson(): String? = null
+
         override suspend fun importPlaylistFromJson(json: String): Long? = null
     }
 

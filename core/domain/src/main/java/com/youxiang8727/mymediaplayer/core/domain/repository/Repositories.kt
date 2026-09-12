@@ -57,7 +57,16 @@ interface PlaylistRepository {
     /** Export a single playlist to JSON string. */
     suspend fun exportPlaylistAsJson(playlistId: Long): String?
 
-    /** Import a playlist from JSON string. Returns created playlist ID, or null on failure. */
+    /** Export ALL playlists to a single JSON string (v2 format). null if no playlists exist. */
+    suspend fun exportAllPlaylistsAsJson(): String?
+
+    /**
+     * Import playlist(s) from JSON string. Accepts both formats：
+     * - v1（單一）：root 含 `playlist` 鍵 → 匯入一個歌單
+     * - v2（bundle）：root 含 `playlists` 鍵（陣列）→ 依序匯入多個歌單，逐筆跳過無效項目
+     *
+     * @return 第一個成功建立的歌單 ID；全部失敗或結構無效時回傳 null。
+     */
     suspend fun importPlaylistFromJson(json: String): Long?
 }
 

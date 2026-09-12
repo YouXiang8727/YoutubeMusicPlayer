@@ -86,6 +86,7 @@ class SearchViewModelTest {
         override suspend fun clearStreamFailed(videoId: String) {}
         override fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>> = emptyFlow()
         override suspend fun exportPlaylistAsJson(playlistId: Long): String? = null
+        override suspend fun exportAllPlaylistsAsJson(): String? = null
         override suspend fun importPlaylistFromJson(json: String): Long? = null
     }
 

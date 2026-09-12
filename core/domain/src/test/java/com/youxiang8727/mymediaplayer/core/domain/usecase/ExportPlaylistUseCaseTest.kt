@@ -53,6 +53,8 @@ class ExportPlaylistUseCaseTest {
             return exportResult
         }
 
+        override suspend fun exportAllPlaylistsAsJson(): String? = null
+
         override suspend fun importPlaylistFromJson(json: String): Long? = null
     }
 
