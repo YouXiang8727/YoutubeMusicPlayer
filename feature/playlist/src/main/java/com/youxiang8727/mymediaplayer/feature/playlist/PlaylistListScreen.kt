@@ -1,8 +1,6 @@
 package com.youxiang8727.mymediaplayer.feature.playlist
 
 import android.content.Context
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +58,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** 播放清單列表頁（無狀態） */
@@ -308,17 +308,14 @@ fun PlaylistListRoute(
     // 匯出：暫存觸發時的歌單名（組檔名用），等 exportResult JSON 就緒後以 MediaStore 直寫
     var pendingExportName by remember { mutableStateOf<String?>(null) }
 
-    // 匯入：挑選 .json 檔，讀取內容後送 VM
-    val importLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) {
-            val json = context.contentResolver.openInputStream(uri)
-                ?.bufferedReader()
-                ?.use { it.readText() }
-            if (json != null) {
-                viewModel.onIntent(PlaylistListIntent.Import(json))
-            }
+    // 匯入：App 內掃描 Download/MyMediaPlayer/ 選檔（不再開系統檔案選擇器）
+    var showImportSheet by remember { mutableStateOf(false) }
+    var backupFiles by remember { mutableStateOf<List<PlaylistBackupFile>>(emptyList()) }
+    val coroutineScope = rememberCoroutineScope()
+
+    fun rescanBackups() {
+        coroutineScope.launch {
+            backupFiles = withContext(Dispatchers.IO) { context.queryPlaylistBackups() }
         }
     }
 
@@ -363,10 +360,35 @@ fun PlaylistListRoute(
             pendingExportName = "Backup_$date"
             viewModel.onIntent(PlaylistListIntent.ExportAll)
         },
-        onImport = { importLauncher.launch("application/json") },
+        onImport = {
+            // 開啟 sheet 前才掃描，確保清單即時
+            rescanBackups()
+            showImportSheet = true
+        },
         onImportConflictDecision = viewModel::onImportConflictDecision,
         onOpenPlaylist = onOpenPlaylist
     )
+
+    // 匯入備份清單 BottomSheet：點擊檔名後才讀取內容送 VM
+    if (showImportSheet) {
+        ImportBackupSheet(
+            backups = backupFiles,
+            onFileSelected = { file ->
+                coroutineScope.launch {
+                    val json = withContext(Dispatchers.IO) {
+                        context.readPlaylistBackup(file.uri)
+                    }
+                    if (json != null) {
+                        viewModel.onIntent(PlaylistListIntent.Import(json))
+                    } else {
+                        snackbarHostState.showSnackbar("讀取備份失敗")
+                    }
+                }
+            },
+            onRescan = { rescanBackups() },
+            onDismiss = { showImportSheet = false }
+        )
+    }
 }
 
 /** 過濾檔案名稱非法字元（Windows/Android 通用），空白名稱兜底為 playlist。 */
