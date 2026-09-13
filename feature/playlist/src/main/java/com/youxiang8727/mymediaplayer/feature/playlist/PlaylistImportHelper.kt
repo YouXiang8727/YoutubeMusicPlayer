@@ -73,6 +73,13 @@ fun Context.readPlaylistBackup(uri: Uri): String? =
         }
     }.getOrNull()
 
+/**
+ * 刪除指定 URI 的備份檔（MediaStore）。
+ * `contentResolver.delete` 回傳 > 0 視為成功；exception 或回傳 0 皆回 false，不 throw。
+ */
+fun Context.deletePlaylistBackup(uri: Uri): Boolean =
+    runCatching { contentResolver.delete(uri, null, null) > 0 }.getOrDefault(false)
+
 // ── 純函式（方便 JVM 單元測試） ──────────────────────────────
 
 /**

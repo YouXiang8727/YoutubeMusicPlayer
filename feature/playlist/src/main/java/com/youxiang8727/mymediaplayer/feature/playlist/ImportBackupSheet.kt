@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -18,10 +19,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.unit.dp
@@ -30,13 +33,15 @@ import java.util.Locale
 
 /**
  * 匯入歌單 BottomSheet：列出 `Download/MyMediaPlayer/` 下的 `.json` 備份檔。
- * 點擊某檔 → [onFileSelected]；點「重新掃描」→ [onRescan]。
+ * 點擊某檔或「匯入」按鈕 → [onFileSelected]；「刪除」按鈕 → [onDelete]（sheet 維持開啟，由呼叫方負責確認彈窗）；
+ * 點「重新掃描」→ [onRescan]。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImportBackupSheet(
     backups: List<PlaylistBackupFile>,
     onFileSelected: (PlaylistBackupFile) -> Unit,
+    onDelete: (PlaylistBackupFile) -> Unit,
     onRescan: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -86,7 +91,8 @@ fun ImportBackupSheet(
                             onClick = {
                                 onFileSelected(backup)
                                 onDismiss()
-                            }
+                            },
+                            onDelete = { onDelete(backup) }
                         )
                         HorizontalDivider()
                     }
@@ -101,26 +107,36 @@ fun ImportBackupSheet(
 @Composable
 private fun ImportBackupItem(
     backup: PlaylistBackupFile,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDelete: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
+            .padding(vertical = 4.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = backup.displayName,
                 style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = "${formatBackupModifiedDate(backup.modifiedAt, Locale.getDefault())}　${formatBackupFileSize(backup.sizeBytes)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+        // 明確的「匯入」按鈕（與整列點擊同行為：選檔後關閉 sheet）
+        TextButton(onClick = onClick) {
+            Text("匯入")
+        }
+        // 刪除按鈕：交由呼叫方彈確認對話框，sheet 維持開啟
+        IconButton(onClick = onDelete) {
+            Icon(Icons.Filled.Delete, contentDescription = "刪除備份")
         }
     }
 }
@@ -172,6 +188,7 @@ private fun ImportBackupSheetPreview() {
         ImportBackupSheet(
             backups = sampleBackups,
             onFileSelected = {},
+            onDelete = {},
             onRescan = {},
             onDismiss = {}
         )
@@ -202,6 +219,7 @@ private fun ImportBackupSheetEmptyPreview() {
         ImportBackupSheet(
             backups = emptyList(),
             onFileSelected = {},
+            onDelete = {},
             onRescan = {},
             onDismiss = {}
         )

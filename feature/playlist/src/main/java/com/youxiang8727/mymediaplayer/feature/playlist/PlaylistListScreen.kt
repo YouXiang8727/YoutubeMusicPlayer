@@ -311,6 +311,8 @@ fun PlaylistListRoute(
     // 匯入：App 內掃描 Download/MyMediaPlayer/ 選檔（不再開系統檔案選擇器）
     var showImportSheet by remember { mutableStateOf(false) }
     var backupFiles by remember { mutableStateOf<List<PlaylistBackupFile>>(emptyList()) }
+    // 待刪除的備份檔（非 null 時顯示刪除確認 AlertDialog，sheet 維持開啟）
+    var pendingDelete by remember { mutableStateOf<PlaylistBackupFile?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
     fun rescanBackups() {
@@ -385,8 +387,41 @@ fun PlaylistListRoute(
                     }
                 }
             },
+            onDelete = { file -> pendingDelete = file },
             onRescan = { rescanBackups() },
             onDismiss = { showImportSheet = false }
+        )
+    }
+
+    // 刪除備份確認 Dialog：置於 sheet 之上（sheet 維持開啟），確認後刪除＋重掃清單
+    pendingDelete?.let { file ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("刪除備份檔？") },
+            text = { Text("確定要刪除「${file.displayName}」嗎？此操作無法復原。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDelete = null
+                        coroutineScope.launch {
+                            val deleted = withContext(Dispatchers.IO) {
+                                context.deletePlaylistBackup(file.uri)
+                            }
+                            if (deleted) {
+                                rescanBackups()
+                                snackbarHostState.showSnackbar("已刪除 ${file.displayName}")
+                            } else {
+                                snackbarHostState.showSnackbar("刪除備份失敗")
+                            }
+                        }
+                    }
+                ) {
+                    Text("刪除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            }
         )
     }
 }
