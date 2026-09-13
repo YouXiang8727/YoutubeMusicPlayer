@@ -1,8 +1,6 @@
 package com.youxiang8727.mymediaplayer.feature.playlist
 
 import android.content.Context
-import android.net.Uri
-import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -42,7 +40,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,7 +58,8 @@ import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** 播放清單列表頁（無狀態） */
 @Composable
@@ -306,39 +304,9 @@ fun PlaylistListRoute(
     val importConflict by viewModel.importConflict.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
-    // 匯出：拿到 JSON 後記住，等 SAF 存檔對話框回傳時寫入
+    // 匯出：暫存觸發時的歌單名（組檔名用），等 exportResult JSON 就緒後以 MediaStore 直寫
     var pendingExportName by remember { mutableStateOf<String?>(null) }
-    var pendingJson by remember { mutableStateOf<String?>(null) }
-
-    val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json")
-    ) { uri ->
-        val json = pendingJson
-        val fallbackName = pendingExportName
-        pendingJson = null
-        if (uri == null || json == null) return@rememberLauncherForActivityResult
-
-        // 寫入 ContentResolver output stream；失敗不再靜默吞掉，以 Snackbar 提示
-        val writeFailed = try {
-            context.contentResolver.openOutputStream(uri)?.use { out ->
-                out.write(json.toByteArray(Charsets.UTF_8))
-            } == null
-        } catch (_: Exception) {
-            true
-        }
-
-        scope.launch {
-            if (writeFailed) {
-                snackbarHostState.showSnackbar("匯出失敗，請再試一次")
-            } else {
-                snackbarHostState.showSnackbar(
-                    buildExportSuccessMessage(context, uri, fallbackName)
-                )
-            }
-        }
-    }
 
     // 匯入：挑選 .json 檔，讀取內容後送 VM
     val importLauncher = rememberLauncherForActivityResult(
@@ -358,12 +326,24 @@ fun PlaylistListRoute(
         viewModel.messages.collect { snackbarHostState.showSnackbar(it) }
     }
 
-    // 匯出成功（JSON 就緒）→ 開 SAF 存檔對話框
+    // 匯出成功（JSON 就緒）→ MediaStore 直寫固定資料夾 Download/MyMediaPlayer/
     LaunchedEffect(Unit) {
         viewModel.exportResult.collect { json ->
-            pendingJson = json
-            exportLauncher.launch(
-                "MyMediaPlayer_${sanitizeFileName(pendingExportName.orEmpty())}.json"
+            val fileName = "MyMediaPlayer_${sanitizeFileName(pendingExportName.orEmpty())}.json"
+            val result = withContext(Dispatchers.IO) {
+                context.writePlaylistBackup(json, fileName)
+            }
+            result.fold(
+                onSuccess = { uri ->
+                    // 檔名衝突時 MediaStore 會自動加「 (N)」後綴，查回實際寫入的名字
+                    val savedName = context.queryStoredDisplayName(uri) ?: fileName
+                    snackbarHostState.showSnackbar(
+                        "已儲存 $savedName（Download/MyMediaPlayer/）"
+                    )
+                },
+                onFailure = {
+                    snackbarHostState.showSnackbar("匯出失敗，請再試一次")
+                }
             )
         }
     }
@@ -392,53 +372,6 @@ fun PlaylistListRoute(
 /** 過濾檔案名稱非法字元（Windows/Android 通用），空白名稱兜底為 playlist。 */
 private fun sanitizeFileName(name: String): String =
     name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifEmpty { "playlist" }
-
-/**
- * 產生匯出成功 Snackbar 訊息（best effort）。
- *
- * 檔名優先取 SAF 提供者的 [OpenableColumns.DISPLAY_NAME]，其次 [Uri.lastPathSegment]
- * （部分提供者該值含目錄前綴，取最後一段），再退回建議檔名與「歌單備份」。
- * 位置取提供者的 `display_location` 欄位（如 primary:Download/...，AOSP 未公開常數故以字面值查），
- * 取不到就省略括號；metadata query 失敗或提供者不支援一律靜默降級，不影響已寫入的檔案。
- */
-private fun buildExportSuccessMessage(
-    context: Context,
-    uri: Uri,
-    fallbackName: String?
-): String {
-    // 位置欄位：AOSP OpenableColumns 有 DISPLAY_LOCATION（值 "display_location"），
-    // 但未公開在 SDK 的 android.jar，故以字面值查欄位；提供者不支援時 getColumnIndex 回 -1。
-    val locationColumn = "display_location"
-
-    var displayName: String? = null
-    var displayLocation: String? = null
-    runCatching {
-        context.contentResolver.query(
-            uri,
-            arrayOf(OpenableColumns.DISPLAY_NAME, locationColumn),
-            null,
-            null,
-            null
-        )?.use { cursor ->
-            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            val locationIndex = cursor.getColumnIndex(locationColumn)
-            if (cursor.moveToFirst()) {
-                displayName = if (nameIndex >= 0) cursor.getString(nameIndex) else null
-                displayLocation = if (locationIndex >= 0) cursor.getString(locationIndex) else null
-            }
-        }
-    }
-
-    val savedName = displayName
-        ?: uri.lastPathSegment?.substringAfterLast('/')
-        ?: fallbackName
-        ?: "歌單備份"
-
-    return displayLocation
-        ?.takeIf { it.isNotBlank() }
-        ?.let { "已儲存 $savedName（$it）" }
-        ?: "已儲存 $savedName"
-}
 
 @Preview(
     showBackground = true,
