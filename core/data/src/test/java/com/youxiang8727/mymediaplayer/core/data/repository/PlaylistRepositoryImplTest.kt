@@ -294,6 +294,9 @@ class PlaylistRepositoryImplTest {
 
         val existingId = repository.createPlaylist("重名歌單")
         assertTrue(existingId > 0)
+        // 舊歌單原本就有同曲 vDup——重現裝置實證場景：修前單一 videoId PK + REPLACE
+        // 會把舊歌單這列「搬」到新歌單（舊歌單被清空），複合鍵後兩者並存互不影響
+        repository.addItem(existingId, item("vDup", playlistId = existingId))
         val conflictCalls = mutableListOf<ImportConflictInfo>()
 
         val json = v2Json(
@@ -324,6 +327,30 @@ class PlaylistRepositoryImplTest {
         val keptId = playlists.first { it.name == "重名歌單 (2)" }.id
         assertEquals(setOf("vDup"), dao.itemTable.value.filter { it.playlistId == keptId }.map { it.videoId }.toSet())
         assertTrue(dao.itemTable.value.none { it.playlistId == -1L })
+
+        // 既有歌單 items 保留（Regression：修前因 videoId 單一 PK + REPLACE 導致跨歌單覆蓋，
+        // KeepBoth「兩者皆保留」變成移花接木——舊歌單同 videoId 的列被新歌單搬走）
+        val originalId = playlists.first { it.name == "重名歌單" }.id
+        assertEquals(setOf("vDup"), dao.itemTable.value.filter { it.playlistId == originalId }.map { it.videoId }.toSet())
+    }
+
+    @Test
+    fun `addItem 同一 videoId 可存在於不同歌單（複合鍵防跨歌單覆蓋）`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val id1 = repository.createPlaylist("歌單A")
+        val id2 = repository.createPlaylist("歌單B")
+        val itemA = PlaylistItem(videoId = "vDup", title = "T1", thumbnailUrl = "", channel = "", duration = null, addedAt = 0L, playlistId = id1)
+        val itemB = PlaylistItem(videoId = "vDup", title = "T1", thumbnailUrl = "", channel = "", duration = null, addedAt = 0L, playlistId = id2)
+        repository.addItem(id1, itemA)
+        repository.addItem(id2, itemB)
+
+        // 兩者並存（修前單一 videoId PK 下第二筆 REPLACE 會覆蓋第一筆）
+        val aItems = repository.observePlaylistItems(id1).first()
+        val bItems = repository.observePlaylistItems(id2).first()
+        assertEquals(1, aItems.size); assertEquals("vDup", aItems[0].videoId)
+        assertEquals(1, bItems.size); assertEquals("vDup", bItems[0].videoId)
     }
 
     @Test

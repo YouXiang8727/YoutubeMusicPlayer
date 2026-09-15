@@ -116,6 +116,47 @@ object DatabaseModule {
         }
     }
 
+    /**
+     * v6 → v7：playlist_items 主鍵由單一 videoId 改為複合鍵 (playlistId, videoId)。
+     *
+     * 根因：單一 videoId 全域 PK + insertItem(REPLACE)，KeepBoth 匯入同曲目到新歌單時
+     * 會覆蓋舊歌單中同 videoId 的資料列（「兩者皆保留」變成移花接木）。
+     * 複合鍵後 REPLACE 以 (playlistId, videoId) 為衝突單位，同一影片可存在於多個歌單。
+     *
+     * 重建法：舊表 PK=videoId → 每列 videoId 唯一 → (playlistId, videoId) 必然無重複，
+     * INSERT...SELECT 複製安全；最後以與 Entity（`Index(value=["playlistId"])`）一致的
+     * `index_playlist_items_playlistId` 重建索引。
+     * 欄位 NOT NULL 配置與 Room 依 Entity 推導的 schema 完全一致（channel 為非空 String）。
+     */
+    private val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `playlist_items_new` (" +
+                    "`videoId` TEXT NOT NULL, " +
+                    "`title` TEXT NOT NULL, " +
+                    "`thumbnailUrl` TEXT NOT NULL, " +
+                    "`channel` TEXT NOT NULL, " +
+                    "`duration` TEXT, " +
+                    "`addedAt` INTEGER NOT NULL, " +
+                    "`playlistId` INTEGER NOT NULL, " +
+                    "`streamFailedAt` INTEGER, " +
+                    "PRIMARY KEY(`playlistId`, `videoId`))"
+            )
+            db.execSQL(
+                "INSERT INTO `playlist_items_new` " +
+                    "(`videoId`,`title`,`thumbnailUrl`,`channel`,`duration`,`addedAt`,`playlistId`,`streamFailedAt`) " +
+                    "SELECT `videoId`,`title`,`thumbnailUrl`,`channel`,`duration`,`addedAt`,`playlistId`,`streamFailedAt` " +
+                    "FROM `playlist_items`"
+            )
+            db.execSQL("DROP TABLE `playlist_items`")
+            db.execSQL("ALTER TABLE `playlist_items_new` RENAME TO `playlist_items`")
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_playlist_items_playlistId` " +
+                    "ON `playlist_items` (`playlistId`)"
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
@@ -123,7 +164,7 @@ object DatabaseModule {
             context.applicationContext,
             AppDatabase::class.java,
             "mymediaplayer.db"
-        ).addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+        ).addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
             .fallbackToDestructiveMigration()  // 對不可預期版本仍是防禦
             .build()
     }

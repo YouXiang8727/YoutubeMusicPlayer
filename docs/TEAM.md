@@ -162,4 +162,6 @@ A 擁有目錄中的**治理性工作**——`docs/**` 規範與架構文件、`
   3. 同一工作項 retry_count ≥ 3 → 停止迴圈，向 Owner 報告阻礙與已完成部分。
 - **retry_count 追蹤機制**：A 派工時在 Task prompt 開頭加標記 `[工作項: <描述>] [重試: N/3]`；N 由 A 於自身 context 維護，收到回報時檢查 N 決定是否可繼續重試。此機制解決「純文字 3 圈上限無法可靠追蹤」的問題。
 - **Task 呼叫失敗**：Task call 超時或回傳錯誤視同 FAIL，計入 retry_count 後重試；連續 3 次失敗停止迴圈，向 Owner 報告。
+- **任務內建置最小化（2026-09-15 裁定）**：重量級 Gradle 驗證（全模組測試、assembleDebug 等）一律由 A 於主 loop 執行。subagent 子任務內只准跑「最窄自測」（單一測試類），不得執行全量測試/編譯。根因：Windows 上長占住的 gradle 步驟（檔案鎖、daemon contention）會使 subagent session 於 in-flight 指令中被 abort，交不回報（TUI 顯示「Task cancelled」但 session 背景仍繼續，造成「cancelled 卻有產出」與「build failed 後無回報」的誤判）。派工或建置前一律先 `gradlew --stop` 清 daemon。
+- **Task 回報「cancelled」＝ FAIL 且先查產出**：計入 retry_count 重新派工前，先比對 git working tree──若 discover「cancelled 任務」其實已在背景完成檔案異動（runaway session），先驗證其產出（編譯＋單測由 A 跑）再決定沿用或重做，避免無謂重工。
 - **作者 ≠ 審查者**：開發類 PR 一律由 A 審查；A 的治理性變更（本節例外工作）不由 A 自審，由 Owner 或指定工程師複核。

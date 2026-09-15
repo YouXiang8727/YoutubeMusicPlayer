@@ -1,10 +1,6 @@
 package com.youxiang8727.mymediaplayer.feature.playlist
 
 import android.content.Context
-import android.net.Uri
-import android.provider.OpenableColumns
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -61,7 +57,9 @@ import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 播放清單列表頁（無狀態） */
 @Composable
@@ -306,51 +304,20 @@ fun PlaylistListRoute(
     val importConflict by viewModel.importConflict.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
-    // 匯出：拿到 JSON 後記住，等 SAF 存檔對話框回傳時寫入
+    // 匯出：暫存觸發時的歌單名（組檔名用），等 exportResult JSON 就緒後以 MediaStore 直寫
     var pendingExportName by remember { mutableStateOf<String?>(null) }
-    var pendingJson by remember { mutableStateOf<String?>(null) }
 
-    val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json")
-    ) { uri ->
-        val json = pendingJson
-        val fallbackName = pendingExportName
-        pendingJson = null
-        if (uri == null || json == null) return@rememberLauncherForActivityResult
+    // 匯入：App 內掃描 Download/MyMediaPlayer/ 選檔（不再開系統檔案選擇器）
+    var showImportSheet by remember { mutableStateOf(false) }
+    var backupFiles by remember { mutableStateOf<List<PlaylistBackupFile>>(emptyList()) }
+    // 待刪除的備份檔（非 null 時顯示刪除確認 AlertDialog，sheet 維持開啟）
+    var pendingDelete by remember { mutableStateOf<PlaylistBackupFile?>(null) }
+    val coroutineScope = rememberCoroutineScope()
 
-        // 寫入 ContentResolver output stream；失敗不再靜默吞掉，以 Snackbar 提示
-        val writeFailed = try {
-            context.contentResolver.openOutputStream(uri)?.use { out ->
-                out.write(json.toByteArray(Charsets.UTF_8))
-            } == null
-        } catch (_: Exception) {
-            true
-        }
-
-        scope.launch {
-            if (writeFailed) {
-                snackbarHostState.showSnackbar("匯出失敗，請再試一次")
-            } else {
-                snackbarHostState.showSnackbar(
-                    buildExportSuccessMessage(context, uri, fallbackName)
-                )
-            }
-        }
-    }
-
-    // 匯入：挑選 .json 檔，讀取內容後送 VM
-    val importLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) {
-            val json = context.contentResolver.openInputStream(uri)
-                ?.bufferedReader()
-                ?.use { it.readText() }
-            if (json != null) {
-                viewModel.onIntent(PlaylistListIntent.Import(json))
-            }
+    fun rescanBackups() {
+        coroutineScope.launch {
+            backupFiles = withContext(Dispatchers.IO) { context.queryPlaylistBackups() }
         }
     }
 
@@ -358,12 +325,24 @@ fun PlaylistListRoute(
         viewModel.messages.collect { snackbarHostState.showSnackbar(it) }
     }
 
-    // 匯出成功（JSON 就緒）→ 開 SAF 存檔對話框
+    // 匯出成功（JSON 就緒）→ MediaStore 直寫固定資料夾 Download/MyMediaPlayer/
     LaunchedEffect(Unit) {
         viewModel.exportResult.collect { json ->
-            pendingJson = json
-            exportLauncher.launch(
-                "MyMediaPlayer_${sanitizeFileName(pendingExportName.orEmpty())}.json"
+            val fileName = "MyMediaPlayer_${sanitizeFileName(pendingExportName.orEmpty())}.json"
+            val result = withContext(Dispatchers.IO) {
+                context.writePlaylistBackup(json, fileName)
+            }
+            result.fold(
+                onSuccess = { uri ->
+                    // 檔名衝突時 MediaStore 會自動加「 (N)」後綴，查回實際寫入的名字
+                    val savedName = context.queryStoredDisplayName(uri) ?: fileName
+                    snackbarHostState.showSnackbar(
+                        "已儲存 $savedName（Download/MyMediaPlayer/）"
+                    )
+                },
+                onFailure = {
+                    snackbarHostState.showSnackbar("匯出失敗，請再試一次")
+                }
             )
         }
     }
@@ -383,62 +362,73 @@ fun PlaylistListRoute(
             pendingExportName = "Backup_$date"
             viewModel.onIntent(PlaylistListIntent.ExportAll)
         },
-        onImport = { importLauncher.launch("application/json") },
+        onImport = {
+            // 開啟 sheet 前才掃描，確保清單即時
+            rescanBackups()
+            showImportSheet = true
+        },
         onImportConflictDecision = viewModel::onImportConflictDecision,
         onOpenPlaylist = onOpenPlaylist
     )
+
+    // 匯入備份清單 BottomSheet：點擊檔名後才讀取內容送 VM
+    if (showImportSheet) {
+        ImportBackupSheet(
+            backups = backupFiles,
+            onFileSelected = { file ->
+                coroutineScope.launch {
+                    val json = withContext(Dispatchers.IO) {
+                        context.readPlaylistBackup(file.uri)
+                    }
+                    if (json != null) {
+                        viewModel.onIntent(PlaylistListIntent.Import(json))
+                    } else {
+                        snackbarHostState.showSnackbar("讀取備份失敗")
+                    }
+                }
+            },
+            onDelete = { file -> pendingDelete = file },
+            onRescan = { rescanBackups() },
+            onDismiss = { showImportSheet = false }
+        )
+    }
+
+    // 刪除備份確認 Dialog：置於 sheet 之上（sheet 維持開啟），確認後刪除＋重掃清單
+    pendingDelete?.let { file ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("刪除備份檔？") },
+            text = { Text("確定要刪除「${file.displayName}」嗎？此操作無法復原。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDelete = null
+                        coroutineScope.launch {
+                            val deleted = withContext(Dispatchers.IO) {
+                                context.deletePlaylistBackup(file.uri)
+                            }
+                            if (deleted) {
+                                rescanBackups()
+                                snackbarHostState.showSnackbar("已刪除 ${file.displayName}")
+                            } else {
+                                snackbarHostState.showSnackbar("刪除備份失敗")
+                            }
+                        }
+                    }
+                ) {
+                    Text("刪除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            }
+        )
+    }
 }
 
 /** 過濾檔案名稱非法字元（Windows/Android 通用），空白名稱兜底為 playlist。 */
 private fun sanitizeFileName(name: String): String =
     name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifEmpty { "playlist" }
-
-/**
- * 產生匯出成功 Snackbar 訊息（best effort）。
- *
- * 檔名優先取 SAF 提供者的 [OpenableColumns.DISPLAY_NAME]，其次 [Uri.lastPathSegment]
- * （部分提供者該值含目錄前綴，取最後一段），再退回建議檔名與「歌單備份」。
- * 位置取提供者的 `display_location` 欄位（如 primary:Download/...，AOSP 未公開常數故以字面值查），
- * 取不到就省略括號；metadata query 失敗或提供者不支援一律靜默降級，不影響已寫入的檔案。
- */
-private fun buildExportSuccessMessage(
-    context: Context,
-    uri: Uri,
-    fallbackName: String?
-): String {
-    // 位置欄位：AOSP OpenableColumns 有 DISPLAY_LOCATION（值 "display_location"），
-    // 但未公開在 SDK 的 android.jar，故以字面值查欄位；提供者不支援時 getColumnIndex 回 -1。
-    val locationColumn = "display_location"
-
-    var displayName: String? = null
-    var displayLocation: String? = null
-    runCatching {
-        context.contentResolver.query(
-            uri,
-            arrayOf(OpenableColumns.DISPLAY_NAME, locationColumn),
-            null,
-            null,
-            null
-        )?.use { cursor ->
-            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            val locationIndex = cursor.getColumnIndex(locationColumn)
-            if (cursor.moveToFirst()) {
-                displayName = if (nameIndex >= 0) cursor.getString(nameIndex) else null
-                displayLocation = if (locationIndex >= 0) cursor.getString(locationIndex) else null
-            }
-        }
-    }
-
-    val savedName = displayName
-        ?: uri.lastPathSegment?.substringAfterLast('/')
-        ?: fallbackName
-        ?: "歌單備份"
-
-    return displayLocation
-        ?.takeIf { it.isNotBlank() }
-        ?.let { "已儲存 $savedName（$it）" }
-        ?: "已儲存 $savedName"
-}
 
 @Preview(
     showBackground = true,
