@@ -102,7 +102,7 @@
 - 新增「文件同步要求」（`docs/TEAM.md` §4）：程式碼異動必須在同一 PR 內同步維護對應文件；所有 merge 進 `master` 的 PR 一律在本檔 `[Unreleased]` 加一筆
 - 新增 `docs/CHANGELOG.md`（Keep a Changelog 格式），並補錄 v1.0.0 歷史決策
 - 新增 `.github/pull_request_template.md`：含文件同步 checklist，未勾選者 Approver 不得 Approve
-- **治理修正**：修正 CHANGELOG.md 關於 Compose BOM 降級之不實記載（維持 `2026.02.01`，Preview 修復改用 `debugImplementation(ui-tooling)`）；更新 TEAM.md §7 通知列隨機/循環圖示決策（改用 Media3 官方 `CommandButton.ICON_*` 依播放模式切換）；移除 `gradle/libs.versions.toml` 中 legacy `androidx-media` 無使用者之定義
+- **治理修正**：修正 CHANGELOG.md 關於 Compose BOM 降級之不實記載（維持 `2026.02.01`，Preview 修復改用 `debugImplementation(ui-tooling)`）；更新 TEAM.md §7 通知列隨機/循環圖示決策（改用 Media3 官方 `CommandButton.ICON_*` 依播放模式切換）；移除 `gradle/libs.versions.toml` 中 legacy `androidx-media` 與 `jsoup` 之無使用者定義
 - 團隊規範的保護分支名稱由 `main` 改為 `master`，對齊實際 repo
 - 入口管制物理強化：B/C/D agent 改 `mode: subagent`（僅可被 Task tool 派工），Tech Lead 改 `mode: primary` 並設為專案 `default_agent`——使用者唯一入口 = Tech Lead；QA 編輯禁區收緊至整個產品程式碼目錄（含 src/test）
 - 新增三份角色專屬技能包（`.opencode/skills/`）：B `newpipe-stream-resolver`（解析管線與失效診斷 SOP）、C `compose-ui-conventions`（頁面三件套與注入白名單）、D `qa-smoke-runbook`（adb/logcat 實操序列與報告格式）
