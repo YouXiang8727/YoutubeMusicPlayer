@@ -76,7 +76,7 @@
   - **A2 補強（media button preferences）**：方案 A 只解決「notification 自訂 actions」，但展開通知仍重複——左半是 **SystemUI 的 MediaStyle media surface**（依 `PlaybackState.actions` 渲染 prev/seekbar/next），右半是我們的 notification 自訂 actions。根因：Media3 `MediaSessionLegacyStub`（MediaSessionLegacyStub.java line 1923-1930）本應在「media button preferences 非空」且 custom layout 含 `SLOT_BACK/FORWARD` 按鈕時，從 `PlaybackState.actions` 移除 `ACTION_SKIP_TO_PREVIOUS/NEXT`，但我們先前只用 `setCustomLayout` 未設 media button preferences → legacy stub 偵測不到 → SystemUI 照畫。A2：在 `MusicService.sessionCallback.onPostConnect` 於既有 `setCustomLayout` 旁新增**廣播級** `mediaSession.setMediaButtonPreferences(buildCustomLayout(session))`（無 controller 參數，`@UnstableApi`；與 `setCustomLayout` 共用同一份含 SLOT_BACK/FORWARD 的按鈕清單），使 legacy stub 正確偵測並移除系統 prev/next。效果需 A 實機 `dumpsys media_session` 驗證 `actions` 不再含 `ACTION_SKIP_TO_PREVIOUS/NEXT`（若生效）
 - **通知列「上一首／下一首」改為永遠常駐**：改用 MediaSession 自訂 session command 的 `CommandButton`（`SLOT_BACK` / `SLOT_FORWARD`），取代系統依 `hasPreviousMediaItem()` / `hasNextMediaItem()` 過濾的 prev/next 按鈕——清單邊界或單曲時不再少一顆，compact 排版固定為 [上一首, 播放/暫停, 下一首]；無上/下一首時按鈕落點為重播目前曲目開頭
 - **修復搜尋「載入更多」輪迴**：根因為 GET `results?continuation=` 會回傳**整頁重新排序**（與前頁重疊 55~100%）。改為續頁走 innerTube `POST youtubei/v1/search`（MWEB context，append-only chunk，重疊 0%；續頁 renderer 為 `videoWithContextRenderer`，欄位對應與首頁不同故新增獨立解析路徑）。ViewModel 補跨頁去重（防 `LazyColumn` duplicate-key 崩潰）與「token 未推進視為到底」guard。新增 `SearchPaging` log（每頁 SUMMARY＋DETAIL 全量 videoId:title＋token 未推進 WARN），供實機驗證續頁正確性
-- **降級 Compose BOM 至 `2025.01.00` (Compose 1.7.6)**，解決 Android Studio 253.32098.37 Preview `ClassNotFoundException: ComposeViewAdapter` 問題：新版 BOM (2026.02.01 → Compose 1.10.4) 超出 AS 設計工具插件支援範圍，降級後 Preview 可正常載入
+- Compose BOM 維持 `2026.02.01`（Compose 1.10.4），透過各模組新增 `debugImplementation(libs.androidx.compose.ui.tooling)` 解決 Android Studio 253.32098.37 Preview `ClassNotFoundException: ComposeViewAdapter` 問題（`ui-tooling-preview` 僅含註解 API，實際渲染需 `ui-tooling` runtime）
 - 修復所有 Compose Preview 渲染問題：
   - `PlayerScreen`：Preview 中以 `LocalInspectionMode.current` 判斷設計時期，以黑色 Box 替代 WebView 避免渲染異常
   - `PlaylistPickerSheet`：兩組 Preview（含項目／空清單）皆能正常顯示
@@ -102,6 +102,7 @@
 - 新增「文件同步要求」（`docs/TEAM.md` §4）：程式碼異動必須在同一 PR 內同步維護對應文件；所有 merge 進 `master` 的 PR 一律在本檔 `[Unreleased]` 加一筆
 - 新增 `docs/CHANGELOG.md`（Keep a Changelog 格式），並補錄 v1.0.0 歷史決策
 - 新增 `.github/pull_request_template.md`：含文件同步 checklist，未勾選者 Approver 不得 Approve
+- **治理修正**：修正 CHANGELOG.md 關於 Compose BOM 降級之不實記載（維持 `2026.02.01`，Preview 修復改用 `debugImplementation(ui-tooling)`）；更新 TEAM.md §7 通知列隨機/循環圖示決策（改用 Media3 官方 `CommandButton.ICON_*` 依播放模式切換）；移除 `gradle/libs.versions.toml` 中 legacy `androidx-media` 與 `jsoup` 之無使用者定義
 - 團隊規範的保護分支名稱由 `main` 改為 `master`，對齊實際 repo
 - 入口管制物理強化：B/C/D agent 改 `mode: subagent`（僅可被 Task tool 派工），Tech Lead 改 `mode: primary` 並設為專案 `default_agent`——使用者唯一入口 = Tech Lead；QA 編輯禁區收緊至整個產品程式碼目錄（含 src/test）
 - 新增三份角色專屬技能包（`.opencode/skills/`）：B `newpipe-stream-resolver`（解析管線與失效診斷 SOP）、C `compose-ui-conventions`（頁面三件套與注入白名單）、D `qa-smoke-runbook`（adb/logcat 實操序列與報告格式）
