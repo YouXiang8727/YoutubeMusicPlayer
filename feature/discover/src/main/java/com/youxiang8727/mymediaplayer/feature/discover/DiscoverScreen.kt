@@ -1,5 +1,6 @@
 package com.youxiang8727.mymediaplayer.feature.discover
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -77,6 +78,9 @@ fun DiscoverScreen(
     var pendingCreateVideo by remember { mutableStateOf<VideoResult?>(null) }
     // 展開完整榜單的區域（null = 全部收合成 rail 並排）（同 feature:search 內以 state 切換，不新增 nav route）
     var fullChartRegion by remember { mutableStateOf<ChartRegion?>(null) }
+
+    // 展開全榜單時攔截系統返回鍵回 rail（對齊 search 頁 BackHandler 慣例）
+    BackHandler(enabled = fullChartRegion != null) { fullChartRegion = null }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         Column(
@@ -435,20 +439,28 @@ private fun ChartRailItem(
             ) {
                 DurationBadge(duration = video.duration)
                 // 獨立可點擊區域（在整卡 onClick 之前攔截），疊於縮圖右下角。
+                // 外層 40dp 為觸控目標，內層 24dp 維持原視覺按鈕大小（只加大點擊範圍）。
                 Box(
                     modifier = Modifier
-                        .size(24.dp)
+                        .size(40.dp)
                         .clip(MaterialTheme.shapes.small)
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
                         .clickable(onClick = onAdd),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        Icons.Filled.Add,
-                        contentDescription = "加入播放清單",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Filled.Add,
+                            contentDescription = "加入播放清單",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }
