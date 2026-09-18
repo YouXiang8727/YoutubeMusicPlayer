@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -40,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.Devices
@@ -88,6 +91,8 @@ fun SearchScreen(
                 onValueChange = { onIntent(SearchIntent.QueryChanged(it)) },
                 label = { Text("搜尋影片") },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onIntent(SearchIntent.Search) }),
                 trailingIcon = {
                     if (state.query.isNotBlank()) {
                         IconButton(onClick = { onIntent(SearchIntent.QueryChanged("")) }) {
@@ -175,15 +180,26 @@ fun SearchScreen(
                     contentAlignment = Alignment.Center
                 ) { CircularProgressIndicator() }
 
-                state.results.isEmpty() -> Box(
-                    Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "查無結果",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                state.results.isEmpty() -> {
+                    val errorMessage = state.error
+                    if (errorMessage != null) {
+                        // 搜尋失敗且無結果：顯示錯誤態（訊息＋重試），不要誤導為「查無結果」
+                        SearchErrorContent(
+                            message = errorMessage,
+                            onRetry = { onIntent(SearchIntent.Search) }
+                        )
+                    } else {
+                        Box(
+                            Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "查無結果",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
 
                 else -> LazyColumn(
@@ -369,6 +385,38 @@ internal fun LoadMoreFooter(
             }
             Text(if (isLoadingMore) "載入中…" else "載入更多")
         }
+    }
+}
+
+/** 搜尋失敗（無結果）狀態：錯誤訊息＋「重試」按鈕（與探索頁錯誤塊同風格，保持 search 頁簡潔）。 */
+@Composable
+private fun SearchErrorContent(
+    message: String,
+    onRetry: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            "搜尋失敗",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            message,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+        Button(
+            onClick = onRetry,
+            modifier = Modifier.padding(top = 12.dp)
+        ) { Text("重試") }
     }
 }
 
@@ -620,6 +668,43 @@ private fun SearchScreenHistoryPreview() {
         SearchScreen(
             state = SearchUiState(
                 history = listOf("周杰倫 晴天", "五月天", "IU 新歌", "YOASOBI")
+            ),
+            playlists = emptyList(),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {},
+            onPlayVideo = {},
+            onCreatePlaylistAndAdd = { _, _ -> }
+        )
+    }
+}
+
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Error - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Error - Light"
+)
+@Composable
+private fun SearchScreenErrorPreview() {
+    MyMediaPlayerTheme {
+        // 搜尋失敗且無結果：錯誤訊息＋重試按鈕（不落入「查無結果」）
+        SearchScreen(
+            state = SearchUiState(
+                query = "周杰倫",
+                searched = true,
+                error = "搜尋服務暫時無回應（HTTP 500）"
             ),
             playlists = emptyList(),
             snackbarHostState = remember { SnackbarHostState() },
