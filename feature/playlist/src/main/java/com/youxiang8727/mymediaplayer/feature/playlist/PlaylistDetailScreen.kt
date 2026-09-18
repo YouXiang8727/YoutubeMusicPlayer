@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -32,7 +33,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,6 +56,9 @@ fun PlaylistDetailScreen(
     onIntent: (PlaylistDetailIntent) -> Unit,
     onBack: () -> Unit,
 ) {
+    // 待確認的「全部清除」（true 時顯示確認 AlertDialog）
+    var showClearAllDialog by remember { mutableStateOf(false) }
+
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         Column(
             modifier = Modifier
@@ -74,7 +80,7 @@ fun PlaylistDetailScreen(
                     modifier = Modifier.weight(1f)
                 )
                 if (state.items.isNotEmpty()) {
-                    TextButton(onClick = { onIntent(PlaylistDetailIntent.ClearAll) }) {
+                    TextButton(onClick = { showClearAllDialog = true }) {
                         Text("全部清除")
                     }
                 }
@@ -144,6 +150,28 @@ fun PlaylistDetailScreen(
                     item { Spacer(Modifier.height(24.dp)) }
                 }
             }
+        }
+
+        // 全部清除確認 Dialog（置於 Scaffold 上層，不被 Snackbar 遮擋）
+        if (showClearAllDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearAllDialog = false },
+                title = { Text("清除播放清單？") },
+                text = { Text("確定要清空「${state.playlistName}」嗎？此操作無法復原。") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showClearAllDialog = false
+                            onIntent(PlaylistDetailIntent.ClearAll)
+                        }
+                    ) {
+                        Text("清除", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearAllDialog = false }) { Text("取消") }
+                }
+            )
         }
     }
 }
