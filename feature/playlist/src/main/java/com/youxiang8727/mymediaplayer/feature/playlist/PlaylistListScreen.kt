@@ -68,6 +68,7 @@ fun PlaylistListScreen(
     importConflict: ImportConflictInfo?,
     snackbarHostState: SnackbarHostState,
     onIntent: (PlaylistListIntent) -> Unit,
+    onRequestDelete: (Playlist) -> Unit,
     onExport: (playlistId: Long) -> Unit,
     onExportAll: () -> Unit,
     onImport: () -> Unit,
@@ -134,7 +135,7 @@ fun PlaylistListScreen(
                             playlist = playlist,
                             onClick = { onOpenPlaylist(playlist.id, playlist.name) },
                             onRename = { showRenameDialog = playlist },
-                            onDelete = { onIntent(PlaylistListIntent.Delete(playlist.id)) },
+                            onDelete = { onRequestDelete(playlist) },
                             onExport = { onExport(playlist.id) }
                         )
                     }
@@ -313,6 +314,8 @@ fun PlaylistListRoute(
     var backupFiles by remember { mutableStateOf<List<PlaylistBackupFile>>(emptyList()) }
     // 待刪除的備份檔（非 null 時顯示刪除確認 AlertDialog，sheet 維持開啟）
     var pendingDelete by remember { mutableStateOf<PlaylistBackupFile?>(null) }
+    // 待刪除的播放清單（非 null 時顯示刪除確認 AlertDialog）
+    var pendingDeletePlaylist by remember { mutableStateOf<Playlist?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
     fun rescanBackups() {
@@ -352,6 +355,7 @@ fun PlaylistListRoute(
         importConflict = importConflict,
         snackbarHostState = snackbarHostState,
         onIntent = viewModel::onIntent,
+        onRequestDelete = { pendingDeletePlaylist = it },
         onExport = { id ->
             pendingExportName = state.playlists.firstOrNull { it.id == id }?.name
             viewModel.onIntent(PlaylistListIntent.Export(id))
@@ -424,6 +428,28 @@ fun PlaylistListRoute(
             }
         )
     }
+
+    // 刪除播放清單確認 Dialog（與備份檔刪除確認同一視覺模式：標題＋內容＋取消/刪除 error 色）
+    pendingDeletePlaylist?.let { playlist ->
+        AlertDialog(
+            onDismissRequest = { pendingDeletePlaylist = null },
+            title = { Text("刪除播放清單？") },
+            text = { Text("確定要刪除「${playlist.name}」嗎？此操作無法復原。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDeletePlaylist = null
+                        viewModel.onIntent(PlaylistListIntent.Delete(playlist.id))
+                    }
+                ) {
+                    Text("刪除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeletePlaylist = null }) { Text("取消") }
+            }
+        )
+    }
 }
 
 /** 過濾檔案名稱非法字元（Windows/Android 通用），空白名稱兜底為 playlist。 */
@@ -456,6 +482,7 @@ private fun PlaylistListScreenEmptyPreview() {
             importConflict = null,
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
+            onRequestDelete = {},
             onExport = {},
             onExportAll = {},
             onImport = {},
@@ -498,6 +525,7 @@ private fun PlaylistListScreenItemsPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             importConflict = null,
             onIntent = {},
+            onRequestDelete = {},
             onExport = {},
             onExportAll = {},
             onImport = {},
