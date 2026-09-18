@@ -163,5 +163,10 @@ A 擁有目錄中的**治理性工作**——`docs/**` 規範與架構文件、`
 - **retry_count 追蹤機制**：A 派工時在 Task prompt 開頭加標記 `[工作項: <描述>] [重試: N/3]`；N 由 A 於自身 context 維護，收到回報時檢查 N 決定是否可繼續重試。此機制解決「純文字 3 圈上限無法可靠追蹤」的問題。
 - **Task 呼叫失敗**：Task call 超時或回傳錯誤視同 FAIL，計入 retry_count 後重試；連續 3 次失敗停止迴圈，向 Owner 報告。
 - **任務內建置最小化（2026-09-15 裁定）**：重量級 Gradle 驗證（全模組測試、assembleDebug 等）一律由 A 於主 loop 執行。subagent 子任務內只准跑「最窄自測」（單一測試類），不得執行全量測試/編譯。根因：Windows 上長占住的 gradle 步驟（檔案鎖、daemon contention）會使 subagent session 於 in-flight 指令中被 abort，交不回報（TUI 顯示「Task cancelled」但 session 背景仍繼續，造成「cancelled 卻有產出」與「build failed 後無回報」的誤判）。派工或建置前一律先 `gradlew --stop` 清 daemon。
+- **A 主 loop 進度可見性（2026-09-18 裁定）**：A 執行長任務時必須讓 Owner 隨時知道「正在做什麼、還有多久、下一步是什麼」，禁止在無文字輸出的情況下長時間靜默。
+  1. A 執行任何重量級 Gradle 指令前，**必須在同一則訊息先輸出**「即將執行 <指令>（預期 N 分鐘）」；指令回傳後**立即輸出結果摘要**（BUILD SUCCESSFUL／FAIL 與關鍵錯誤）。不允許 tool call 成為訊息結尾而後續無文字。
+  2. 多步驟工作（拆解→派工→審查→驗證→收尾）每完成一個大階段，輸出 checkpoint 摘要（已完成／進行中／下一步）。
+  3. 連續 tool call 之間若有長等待（>60s），先宣告預期耗時。
+  4. 根因：2026-09-18 事件——A 於 `gradlew test assembleDebug` 成功（BUILD SUCCESSFUL in 1m 3s）後未立即輸出結果，Owner 誤判卡住而取消工作（實際產出零遺失；事後確認無 process 死鎖，殘留 java 為 Gradle daemon 正常常駐）。
 - **Task 回報「cancelled」＝ FAIL 且先查產出**：計入 retry_count 重新派工前，先比對 git working tree──若 discover「cancelled 任務」其實已在背景完成檔案異動（runaway session），先驗證其產出（編譯＋單測由 A 跑）再決定沿用或重做，避免無謂重工。
 - **作者 ≠ 審查者**：開發類 PR 一律由 A 審查；A 的治理性變更（本節例外工作）不由 A 自審，由 Owner 或指定工程師複核。

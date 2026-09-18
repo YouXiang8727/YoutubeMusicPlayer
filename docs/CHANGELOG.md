@@ -108,6 +108,7 @@
 - `docs/TEAM.md` §8 新增「入口管制（物理強制）」條目，記錄上述機制與技能包維護權責
 - 新增搜尋續頁 QA 驗證報告（`docs/qa/reports/2026-08-29-804da8f-search-pagination.md`）：4 頁續頁 token 鏈、`APPEND dup=0`、無 `WARN token not advanced`、無 crash 全 PASS；「載入更多」採顯式按鈕經 A 判讀為**設計使然**（非 infinite-scroll）並結案；常規驗證項納入煙霧清單 #13
 - TEAM.md §1/§8 修正 merge 權責：PR 的 **merge 一律由 Owner 在 GitHub 執行**（A 只負責開 PR 與審查，不代按 merge，除非 Owner 明確指示）
+- TEAM.md §8 新增「**A 主 loop 進度可見性**」（2026-09-18 裁定）：重量級 Gradle 指令執行前必須先輸出「即將執行 <指令>（預期 N 分鐘）」、回傳後立即輸出結果摘要；多步驟工作每完成一大階段輸出 checkpoint 摘要；連續 tool call 長等待（>60s）先宣告預期耗時。根因：A 於 `gradlew test assembleDebug` 成功後未立即輸出結果，Owner 誤判卡住而取消工作（產出零遺失、無 process 死鎖）
 
 ## [1.0.0] - 2026-08
 
