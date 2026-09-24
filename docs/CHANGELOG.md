@@ -16,6 +16,10 @@
   - `MiniPlayerBar` 重寫：支援向上拖曳（`detectDragGestures`＋`Animatable`，位移 >50dp 觸發）展開至螢幕 50% 高度，展開區顯示拖曳 handle＋「播放佇列」標題＋清空佇列＋`LazyColumn` 佇列列表（目前播放項高亮＋點擊切歌＋移除鈕）＋「存為播放清單」按鈕（功能待 S2 實作；底座 `surfaceVariant` 色）；收起狀態保留原控制列並新增「展開」IconButton；`MainActivity` 持有 `isMiniPlayerExpanded` 狀態、展開時顯示半透明遮罩（點擊收起）。
   - 圖示僅用 `material-icons-core` 既有圖示（`KeyboardArrowUp`/`Delete`/`PlayArrow`/`Add`/`Star`/`Close`），未引入 extended 依賴。
 
+### Fixed
+- **MiniPlayerBar 展開後內容未渲染**（2026-09-24，QA 與實機復現）：`MainActivity` 將全螢幕 scrim（`Box(Modifier.fillMaxSize())`）置於 Scaffold `bottomBar` slot 內，`fillMaxSize` 把 bottomBar root 撐到全螢幕高，內部 `Column`（topStart 對齊）被推到畫面頂部，MiniPlayerBar 與 content 重疊、內容不可達（accessibility tree 只剩被頂到畫面中央的底部導覽列）。修復：scrim 移出 bottomBar、改為 Scaffold 外層全屏 overlay（`zIndex(1f)`），MiniPlayerBar 提升至 `zIndex(2f)` 且以 `align(BottomCenter)`＋`onSizeChanged` 量測補償 NavHost 底部預留
+- **MiniPlayerBar 拖曳收起永遠失效**（2026-09-24）：`pointerInput(Unit)` 的 block 只在首次 composition 執行一次，`onDragEnd` 閉包捕獲的 `isExpanded` 是初始 stale `false`，導致展開後下拖的 `else if (dragY > 50f && isExpanded)` 恒為 false、永不觸發收起（拖曳展開因讀 `!isExpanded` 恰巧正常）。修復：以 `rememberUpdatedState(isExpanded)` 讓 `onDragEnd` 讀取最新值，`pointerInput` key 維持 `Unit` 不重啟手勢
+
 ### Changed
 - **停用 Gradle daemon 避免 build 後殘留背景進程**：`gradle.properties` 新增 `org.gradle.daemon=false`，解決 Tech Lead agent 執行 Gradle 指令後卡在 "build successfully" 的問題（daemon 保持存活導致 agent 誤判命令尚未結束）。Kotlin compiler daemon 評估後保留（build 完成後會自動退出，無殘留問題）
 
