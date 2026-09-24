@@ -97,6 +97,7 @@ class PlaylistDetailViewModelTest {
         val playQueueCalls = mutableListOf<Pair<List<PlayQueueItem>, Int>>()
         val playCalls = mutableListOf<Pair<String, String>>()
         override val playback = MutableStateFlow(PlaybackSnapshot())
+        override val queue = MutableStateFlow<List<PlayQueueItem>>(emptyList())
 
         override fun play(videoId: String, title: String) {
             playCalls += videoId to title
@@ -113,6 +114,9 @@ class PlaylistDetailViewModelTest {
         override fun toggleShuffle() {}
         override fun cycleRepeatMode() {}
         override fun stop() {}
+        override fun seekToIndex(index: Int) {}
+        override fun removeFromQueue(index: Int) {}
+        override fun clearQueue() {}
     }
 
     private class Harness(
