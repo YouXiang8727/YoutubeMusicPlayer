@@ -38,6 +38,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,6 +89,9 @@ fun MiniPlayerBar(
     val expandedHeight = (screenHeightDp * 0.5f).dp
     val dragY = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
+    // pointerInput 以 Unit 為 key，只在首次 composition 建立一次；
+    // 以 rememberUpdatedState 讓 onDragEnd 讀到最新 isExpanded（避免閉包捕獲 stale 值）。
+    val currentIsExpanded by rememberUpdatedState(isExpanded)
     var toastRef by remember { mutableStateOf<Toast?>(null) }
 
     fun showToast(message: String) {
@@ -106,8 +110,8 @@ fun MiniPlayerBar(
                 detectDragGestures(
                     onDragEnd = {
                         // 拖曳結束：依位移決定展開/收起（負位移 = 上滑 = 展開）
-                        if (dragY.value < -50f && !isExpanded) onToggleExpand()
-                        else if (dragY.value > 50f && isExpanded) onToggleExpand()
+                        if (dragY.value < -50f && !currentIsExpanded) onToggleExpand()
+                        else if (dragY.value > 50f && currentIsExpanded) onToggleExpand()
                         scope.launch { dragY.snapTo(0f) }
                     }
                 ) { change, dragAmount ->
