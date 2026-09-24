@@ -9,6 +9,13 @@
 
 ## [Unreleased]
 
+### Added
+- **MiniPlayerBar 可拖曳展開至螢幕 50% 高度顯示播放佇列**（`feature:player`，2026-09）：
+  - `core:domain` `PlayerController` 新增 `queue: StateFlow<List<PlayQueueItem>>`、`seekToIndex(index)`、`removeFromQueue(index)`、`clearQueue()` 四項契約；`feature:player` `MediaControllerPlayerController` 實作佇列觀察（`onPlaylistMetadataChanged`/`onMediaItemTransition` → `getMediaItemCount()`/`getMediaItemAt()` 轉換為 `PlayQueueItem` 列表）與佇列操作（`seekTo(index, 0L)`、`removeMediaItem`、`clearMediaItems`）。
+  - `PlayerViewModel` 暴露 `queue` 並新增 `PlaybackIntent.SeekToIndex`／`RemoveFromQueue`／`ClearQueue`。
+  - `MiniPlayerBar` 重寫：支援向上拖曳（`detectDragGestures`＋`Animatable`，位移 >50dp 觸發）展開至螢幕 50% 高度，展開區顯示拖曳 handle＋「播放佇列」標題＋清空佇列＋`LazyColumn` 佇列列表（目前播放項高亮＋點擊切歌＋移除鈕）＋「存為播放清單」按鈕（功能待 S2 實作；底座 `surfaceVariant` 色）；收起狀態保留原控制列並新增「展開」IconButton；`MainActivity` 持有 `isMiniPlayerExpanded` 狀態、展開時顯示半透明遮罩（點擊收起）。
+  - 圖示僅用 `material-icons-core` 既有圖示（`KeyboardArrowUp`/`Delete`/`PlayArrow`/`Add`/`Star`/`Close`），未引入 extended 依賴。
+
 ### Changed
 - **停用 Gradle daemon 避免 build 後殘留背景進程**：`gradle.properties` 新增 `org.gradle.daemon=false`，解決 Tech Lead agent 執行 Gradle 指令後卡在 "build successfully" 的問題（daemon 保持存活導致 agent 誤判命令尚未結束）。Kotlin compiler daemon 評估後保留（build 完成後會自動退出，無殘留問題）
 

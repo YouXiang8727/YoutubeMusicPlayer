@@ -9,6 +9,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -32,7 +35,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -41,6 +47,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.youxiang8727.mymediaplayer.core.domain.model.PlaybackSnapshot
+import com.youxiang8727.mymediaplayer.core.domain.model.PlayQueueItem
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
 import com.youxiang8727.mymediaplayer.feature.discover.DiscoverRoute
 import com.youxiang8727.mymediaplayer.feature.player.MiniPlayerBar
@@ -103,6 +111,10 @@ fun MyApp() {
     // activity-scoped：MiniPlayerBar 與各頁面共用同一狀態源（MediaSession）
     val playerViewModel: PlayerViewModel = viewModel()
     val playback by playerViewModel.playback.collectAsState()
+    val queue by playerViewModel.queue.collectAsState()
+
+    // MiniPlayerBar 展開狀態（50% 螢幕高度）
+    var isMiniPlayerExpanded by remember { mutableStateOf(false) }
 
     // 播放失敗的 App 內回饋（P1）：errorMessage 由 ExoPlayer 保留至下次 prepare()，
     // 此處做 one-shot 顯示；錯誤清除（null）時重置去重鍵，同曲重試失敗仍會再次提示。
@@ -127,61 +139,87 @@ fun MyApp() {
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            Column {
-                AnimatedVisibility(visible = playback.hasCurrent) {
-                    MiniPlayerBar(
-                        snapshot = playback,
-                        onTogglePlayPause = {
-                            playerViewModel.onPlaybackIntent(PlaybackIntent.TogglePlayPause)
-                        },
-                        onNext = { playerViewModel.onPlaybackIntent(PlaybackIntent.Next) },
-                        onPrevious = { playerViewModel.onPlaybackIntent(PlaybackIntent.Previous) },
-                        onToggleShuffle = { playerViewModel.onPlaybackIntent(PlaybackIntent.ToggleShuffle) },
-                        onCycleRepeat = { playerViewModel.onPlaybackIntent(PlaybackIntent.CycleRepeat) },
-                        onSeek = { positionMs ->
-                            playerViewModel.onPlaybackIntent(PlaybackIntent.Seek(positionMs))
-                        }
+            Box {
+                // 展開時半透明遮罩（點擊收起）
+                if (isMiniPlayerExpanded) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.4f))
+                            .clickable { isMiniPlayerExpanded = false }
                     )
                 }
-                if (showBottomBar) {
-                    NavigationBar {
-                        NavigationBarItem(
-                            selected = currentRoute == Routes.SEARCH,
-                            onClick = {
-                                navController.navigate(Routes.SEARCH) {
-                                    popUpTo(Routes.SEARCH) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
+                Column {
+                    AnimatedVisibility(visible = playback.hasCurrent) {
+                        MiniPlayerBar(
+                            snapshot = playback,
+                            queue = queue,
+                            isExpanded = isMiniPlayerExpanded,
+                            onToggleExpand = { isMiniPlayerExpanded = !isMiniPlayerExpanded },
+                            onTogglePlayPause = {
+                                playerViewModel.onPlaybackIntent(PlaybackIntent.TogglePlayPause)
                             },
-                            icon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                            label = { Text("搜尋") }
-                        )
-                        NavigationBarItem(
-                            selected = currentRoute == Routes.DISCOVER,
-                            onClick = {
-                                navController.navigate(Routes.DISCOVER) {
-                                    popUpTo(Routes.SEARCH) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
+                            onNext = { playerViewModel.onPlaybackIntent(PlaybackIntent.Next) },
+                            onPrevious = { playerViewModel.onPlaybackIntent(PlaybackIntent.Previous) },
+                            onToggleShuffle = { playerViewModel.onPlaybackIntent(PlaybackIntent.ToggleShuffle) },
+                            onCycleRepeat = { playerViewModel.onPlaybackIntent(PlaybackIntent.CycleRepeat) },
+                            onSeek = { positionMs ->
+                                playerViewModel.onPlaybackIntent(PlaybackIntent.Seek(positionMs))
                             },
-                            icon = { Icon(Icons.Filled.Star, contentDescription = null) },
-                            label = { Text("探索") }
-                        )
-                        NavigationBarItem(
-                            selected = currentRoute == Routes.PLAYLIST_LIST ||
-                                    currentRoute?.startsWith("playlist_detail") == true,
-                            onClick = {
-                                navController.navigate(Routes.PLAYLIST_LIST) {
-                                    popUpTo(Routes.SEARCH) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
+                            onSeekToIndex = { index ->
+                                playerViewModel.onPlaybackIntent(PlaybackIntent.SeekToIndex(index))
                             },
-                            icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
-                            label = { Text("播放清單") }
+                            onRemoveFromQueue = { index ->
+                                playerViewModel.onPlaybackIntent(PlaybackIntent.RemoveFromQueue(index))
+                            },
+                            onClearQueue = {
+                                playerViewModel.onPlaybackIntent(PlaybackIntent.ClearQueue)
+                            },
+                            onSaveAsPlaylist = {
+                                // TODO: 存為播放清單（S2 工作項實作）
+                            }
                         )
+                    }
+                    if (showBottomBar) {
+                        NavigationBar {
+                            NavigationBarItem(
+                                selected = currentRoute == Routes.SEARCH,
+                                onClick = {
+                                    navController.navigate(Routes.SEARCH) {
+                                        popUpTo(Routes.SEARCH) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
+                                icon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                                label = { Text("搜尋") }
+                            )
+                            NavigationBarItem(
+                                selected = currentRoute == Routes.DISCOVER,
+                                onClick = {
+                                    navController.navigate(Routes.DISCOVER) {
+                                        popUpTo(Routes.SEARCH) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
+                                icon = { Icon(Icons.Filled.Star, contentDescription = null) },
+                                label = { Text("探索") }
+                            )
+                            NavigationBarItem(
+                                selected = currentRoute == Routes.PLAYLIST_LIST ||
+                                        currentRoute?.startsWith("playlist_detail") == true,
+                                onClick = {
+                                    navController.navigate(Routes.PLAYLIST_LIST) {
+                                        popUpTo(Routes.SEARCH) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
+                                icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
+                                label = { Text("播放清單") }
+                            )
+                        }
                     }
                 }
             }
