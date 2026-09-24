@@ -16,6 +16,15 @@ sealed interface PlaybackIntent {
     data object CycleRepeat : PlaybackIntent
     data class Seek(val positionMs: Long) : PlaybackIntent
 
+    /** 跳轉至佇列指定索引播放（MiniPlayerBar 展開佇列點擊）。 */
+    data class SeekToIndex(val index: Int) : PlaybackIntent
+
+    /** 從佇列移除指定索引曲目（MiniPlayerBar 展開佇列）。 */
+    data class RemoveFromQueue(val index: Int) : PlaybackIntent
+
+    /** 清空目前播放佇列。 */
+    data object ClearQueue : PlaybackIntent
+
     /**
      * 直接起播指定影片，不導航至播放頁（本專案已無全螢幕播放頁）。
      * 由 activity scope 的 PlayerViewModel（app 容器層）轉 call PlayerController.play，
@@ -39,6 +48,9 @@ class PlayerViewModel @Inject constructor(
     val playback: StateFlow<com.youxiang8727.mymediaplayer.core.domain.model.PlaybackSnapshot> =
         playerController.playback
 
+    /** 目前播放佇列（供 MiniPlayerBar 展開顯示）。 */
+    val queue: StateFlow<List<PlayQueueItem>> = playerController.queue
+
     /** 給 MiniPlayerBar（activity scope）使用；[PlaybackIntent.Play] 供外部列表直接起播。 */
     fun onPlaybackIntent(intent: PlaybackIntent) {
         when (intent) {
@@ -48,6 +60,9 @@ class PlayerViewModel @Inject constructor(
             is PlaybackIntent.ToggleShuffle -> playerController.toggleShuffle()
             is PlaybackIntent.CycleRepeat -> playerController.cycleRepeatMode()
             is PlaybackIntent.Seek -> playerController.seekTo(intent.positionMs)
+            is PlaybackIntent.SeekToIndex -> playerController.seekToIndex(intent.index)
+            is PlaybackIntent.RemoveFromQueue -> playerController.removeFromQueue(intent.index)
+            is PlaybackIntent.ClearQueue -> playerController.clearQueue()
             is PlaybackIntent.Play -> playerController.play(intent.videoId, intent.title)
             is PlaybackIntent.PlayList -> playerController.playQueue(intent.entries, intent.startIndex)
         }

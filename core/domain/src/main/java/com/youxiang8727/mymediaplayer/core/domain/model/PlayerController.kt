@@ -12,6 +12,9 @@ interface PlayerController {
     /** 播放狀態快照（含每 ~250ms 更新一次的進度）。 */
     val playback: StateFlow<PlaybackSnapshot>
 
+    /** 目前播放佇列（含暫時性佇列與 Room 播放清單），依播放順序排序。 */
+    val queue: StateFlow<List<PlayQueueItem>>
+
     /** 播放指定影片：在播放清單中則以整份清單為佇列，否則單曲。 */
     fun play(videoId: String, title: String)
 
@@ -43,4 +46,13 @@ interface PlayerController {
     fun cycleRepeatMode()
 
     fun stop()
+
+    /** 跳轉至佇列指定索引位置播放。 */
+    fun seekToIndex(index: Int)
+
+    /** 從佇列移除指定索引曲目。 */
+    fun removeFromQueue(index: Int)
+
+    /** 清空目前播放佇列。 */
+    fun clearQueue()
 }

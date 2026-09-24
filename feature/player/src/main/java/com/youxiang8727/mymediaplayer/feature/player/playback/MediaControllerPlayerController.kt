@@ -46,6 +46,9 @@ class MediaControllerPlayerController @Inject constructor(
     private val _playback = MutableStateFlow(PlaybackSnapshot())
     override val playback: StateFlow<PlaybackSnapshot> = _playback.asStateFlow()
 
+    private val _queue = MutableStateFlow<List<PlayQueueItem>>(emptyList())
+    override val queue: StateFlow<List<PlayQueueItem>> = _queue.asStateFlow()
+
     init {
         // SessionToken 解析依賴 manifest 的 MediaSessionService intent-filter；
         // 失敗時降級為「未連線」（playback 停留空狀態），不可炸掉 composition。
@@ -56,8 +59,13 @@ class MediaControllerPlayerController @Inject constructor(
             controllerFlow.collect { controller ->
                 if (controller == null) {
                     _playback.value = PlaybackSnapshot()
+                    _queue.value = emptyList()
                 } else {
-                    observeSnapshot(controller)
+                    // Bug A 修復：observeSnapshot 內部對無窮 combine 流 collect、永不返回，
+                    // 順序 invoke 會卡死導致 observeQueue 永不執行；改為並行子 job，
+                    // collect block 立即返回，兩條觀察流同時運行。
+                    launch { observeSnapshot(controller) }
+                    launch { observeQueue(controller) }
                 }
             }
         }
@@ -103,6 +111,38 @@ class MediaControllerPlayerController @Inject constructor(
         combine(events, ticker) { _, _ -> controller.toSnapshot() }
             .onStart { emit(controller.toSnapshot()) }
             .collect { _playback.value = it }
+    }
+
+    /** 監聽佇列變更（播放清單 metadata 改變、歌曲切換），折疊成 PlayQueueItem 列表流。 */
+    private suspend fun observeQueue(controller: MediaController) {
+        val events = callbackFlow {
+            val listener = object : Player.Listener {
+                override fun onPlaylistMetadataChanged(mediaMetadata: MediaMetadata) { trySend(Unit) }
+                // Bug B 修復：setMediaItems() 換置佇列時的主力事件是 onTimelineChanged
+                //（reason = TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED），缺此事件佇列變更不會重讀。
+                override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) { trySend(Unit) }
+                override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) { trySend(Unit) }
+                override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) { trySend(Unit) }
+            }
+            controller.addListener(listener)
+            awaitClose { controller.removeListener(listener) }
+        }
+
+        events
+            .onStart { emit(Unit) }
+            .collect { _queue.value = controller.toQueue() }
+    }
+
+    private fun MediaController.toQueue(): List<PlayQueueItem> {
+        val count = mediaItemCount
+        if (count == 0) return emptyList()
+        return (0 until count).map { index ->
+            val item = getMediaItemAt(index)
+            PlayQueueItem(
+                videoId = item.mediaId,
+                title = item.mediaMetadata?.title?.toString() ?: item.mediaId
+            )
+        }
     }
 
     private fun MediaController.toSnapshot(): PlaybackSnapshot {
@@ -179,6 +219,17 @@ class MediaControllerPlayerController @Inject constructor(
     override fun stop() {
         context.startService(Intent(context, MusicService::class.java).setAction(MusicService.ACTION_STOP))
     }
+
+    override fun seekToIndex(index: Int) = withController { it.seekTo(index, 0L) }
+
+    override fun removeFromQueue(index: Int) = withController {
+        val currentIndex = it.currentMediaItemIndex
+        it.removeMediaItem(index)
+        // 移除的是目前播放項之前，則 currentMediaItemIndex 會位移，重指回原曲
+        if (index < currentIndex) it.seekTo(currentIndex - 1, 0L)
+    }
+
+    override fun clearQueue() = withController { it.clearMediaItems() }
 
     companion object {
         private const val TAG = "PlayerController"
