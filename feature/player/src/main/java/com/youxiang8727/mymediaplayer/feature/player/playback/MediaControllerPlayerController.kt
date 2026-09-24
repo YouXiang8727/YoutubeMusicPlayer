@@ -61,8 +61,11 @@ class MediaControllerPlayerController @Inject constructor(
                     _playback.value = PlaybackSnapshot()
                     _queue.value = emptyList()
                 } else {
-                    observeSnapshot(controller)
-                    observeQueue(controller)
+                    // Bug A 修復：observeSnapshot 內部對無窮 combine 流 collect、永不返回，
+                    // 順序 invoke 會卡死導致 observeQueue 永不執行；改為並行子 job，
+                    // collect block 立即返回，兩條觀察流同時運行。
+                    launch { observeSnapshot(controller) }
+                    launch { observeQueue(controller) }
                 }
             }
         }
@@ -115,6 +118,9 @@ class MediaControllerPlayerController @Inject constructor(
         val events = callbackFlow {
             val listener = object : Player.Listener {
                 override fun onPlaylistMetadataChanged(mediaMetadata: MediaMetadata) { trySend(Unit) }
+                // Bug B 修復：setMediaItems() 換置佇列時的主力事件是 onTimelineChanged
+                //（reason = TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED），缺此事件佇列變更不會重讀。
+                override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) { trySend(Unit) }
                 override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) { trySend(Unit) }
                 override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) { trySend(Unit) }
             }
