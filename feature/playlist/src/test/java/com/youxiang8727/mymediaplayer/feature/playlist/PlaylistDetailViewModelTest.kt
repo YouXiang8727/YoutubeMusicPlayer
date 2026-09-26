@@ -107,6 +107,8 @@ class PlaylistDetailViewModelTest {
             playQueueCalls += items to startIndex
         }
 
+        override fun addToQueue(videoId: String, title: String) {}
+
         override fun togglePlayPause() {}
         override fun seekToNext() {}
         override fun seekToPrevious() {}

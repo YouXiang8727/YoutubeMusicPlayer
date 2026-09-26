@@ -201,6 +201,16 @@ class MediaControllerPlayerController @Inject constructor(
         context.startForegroundService(intent)
     }
 
+    override fun addToQueue(videoId: String, title: String) {
+        // 佇列 append 統一由 MusicService 端處理（與 play/playQueue 同一哲學）：
+        // Controller 只做 Intent 轉送，佇列操作集中在服務端單一入口。
+        val intent = Intent(context, MusicService::class.java)
+            .setAction(MusicService.ACTION_ADD_TO_QUEUE)
+            .putExtra(MusicService.EXTRA_VIDEO_ID, videoId)
+            .putExtra(MusicService.EXTRA_TITLE, title)
+        context.startForegroundService(intent)
+    }
+
     override fun togglePlayPause() = withController { if (it.isPlaying) it.pause() else it.play() }
 
     override fun seekToNext() = withController { it.seekToNext() }

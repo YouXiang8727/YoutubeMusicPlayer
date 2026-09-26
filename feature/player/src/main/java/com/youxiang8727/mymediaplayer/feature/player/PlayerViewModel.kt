@@ -37,6 +37,13 @@ sealed interface PlaybackIntent {
      * 由 activity scope 的 PlayerViewModel（app 容器層）轉 call PlayerController.playQueue。
      */
     data class PlayList(val entries: List<PlayQueueItem>, val startIndex: Int) : PlaybackIntent
+
+    /**
+     * 將單曲加入目前播放佇列尾端（append-only，不中斷目前播放）。
+     * 由 activity scope 的 PlayerViewModel（app 容器層）轉 call PlayerController.addToQueue，
+     * 供外部列表（搜尋結果、熱門榜單卡片）的「加入佇列」按鈕使用。
+     */
+    data class AddToQueue(val videoId: String, val title: String) : PlaybackIntent
 }
 
 @HiltViewModel
@@ -65,6 +72,7 @@ class PlayerViewModel @Inject constructor(
             is PlaybackIntent.ClearQueue -> playerController.clearQueue()
             is PlaybackIntent.Play -> playerController.play(intent.videoId, intent.title)
             is PlaybackIntent.PlayList -> playerController.playQueue(intent.entries, intent.startIndex)
+            is PlaybackIntent.AddToQueue -> playerController.addToQueue(intent.videoId, intent.title)
         }
     }
 }

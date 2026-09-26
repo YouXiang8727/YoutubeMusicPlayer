@@ -61,6 +61,7 @@ fun SearchScreen(
     snackbarHostState: SnackbarHostState,
     onIntent: (SearchIntent) -> Unit,
     onPlayVideo: (VideoResult) -> Unit,
+    onAddToQueue: (VideoResult) -> Unit,
     onCreatePlaylistAndAdd: (name: String, video: VideoResult) -> Unit
 ) {
     // 顯示播放清單選擇 BottomSheet（帶影片資料）
@@ -224,7 +225,11 @@ fun SearchScreen(
                 showPickerVideo = null
                 showCreateDialog = true
             },
-            onDismiss = { showPickerVideo = null }
+            onDismiss = { showPickerVideo = null },
+            onAddToQueue = {
+                onAddToQueue(video)
+                showPickerVideo = null
+            }
         )
     }
 
@@ -328,8 +333,9 @@ private fun VideoCard(
                     )
                 }
             }
+            // 右側單顆「＋」：開啟選單（加入當前播放佇列／選擇播放清單）
             IconButton(onClick = onAdd) {
-                Icon(Icons.Filled.Add, contentDescription = "加入播放清單")
+                Icon(Icons.Filled.Add, contentDescription = "加入")
             }
         }
     }
@@ -376,7 +382,8 @@ internal fun LoadMoreFooter(
 @Composable
 fun SearchRoute(
     viewModel: SearchViewModel = hiltViewModel(),
-    onPlayVideo: (VideoResult) -> Unit
+    onPlayVideo: (VideoResult) -> Unit,
+    onAddToQueue: (VideoResult) -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
@@ -392,6 +399,7 @@ fun SearchRoute(
         snackbarHostState = snackbarHostState,
         onIntent = viewModel::onIntent,
         onPlayVideo = onPlayVideo,
+        onAddToQueue = onAddToQueue,
         onCreatePlaylistAndAdd = viewModel::createPlaylistAndAdd
     )
 }
@@ -423,6 +431,7 @@ private fun SearchScreenEmptyPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onPlayVideo = {},
+            onAddToQueue = {},
             onCreatePlaylistAndAdd = { _, _ -> }
         )
     }
@@ -463,6 +472,7 @@ private fun SearchScreenSuggestionsPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onPlayVideo = {},
+            onAddToQueue = {},
             onCreatePlaylistAndAdd = { _, _ -> }
         )
     }
@@ -505,6 +515,7 @@ private fun SearchScreenResultsPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onPlayVideo = {},
+            onAddToQueue = {},
             onCreatePlaylistAndAdd = { _, _ -> }
         )
     }
@@ -547,6 +558,7 @@ private fun SearchScreenResultsLoadMorePreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onPlayVideo = {},
+            onAddToQueue = {},
             onCreatePlaylistAndAdd = { _, _ -> }
         )
     }
@@ -590,6 +602,7 @@ private fun SearchScreenResultsLoadingMorePreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onPlayVideo = {},
+            onAddToQueue = {},
             onCreatePlaylistAndAdd = { _, _ -> }
         )
     }
@@ -625,6 +638,7 @@ private fun SearchScreenHistoryPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onPlayVideo = {},
+            onAddToQueue = {},
             onCreatePlaylistAndAdd = { _, _ -> }
         )
     }

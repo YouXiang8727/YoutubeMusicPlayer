@@ -67,7 +67,8 @@ fun DiscoverScreen(
     snackbarHostState: SnackbarHostState,
     onIntent: (DiscoverIntent) -> Unit,
     onCreatePlaylistAndAdd: (name: String, video: VideoResult) -> Unit,
-    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit
+    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
+    onAddToQueue: (VideoResult) -> Unit
 ) {
     // 顯示播放清單選擇 BottomSheet（帶影片資料）
     var showPickerVideo by remember { mutableStateOf<VideoResult?>(null) }
@@ -146,7 +147,11 @@ fun DiscoverScreen(
                 showPickerVideo = null
                 showCreateDialog = true
             },
-            onDismiss = { showPickerVideo = null }
+            onDismiss = { showPickerVideo = null },
+            onAddToQueue = {
+                onAddToQueue(video)
+                showPickerVideo = null
+            }
         )
     }
 
@@ -425,7 +430,7 @@ private fun ChartRailItem(
                 .fillMaxWidth()
                 .height(80.dp)
         ) {
-            // 右下角：時長 badge 與「加入播放清單」並排
+            // 右下角：時長 badge ＋ 單顆「＋」badge（開啟加入選單）
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -445,7 +450,7 @@ private fun ChartRailItem(
                 ) {
                     Icon(
                         Icons.Filled.Add,
-                        contentDescription = "加入播放清單",
+                        contentDescription = "加入",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
                     )
@@ -510,8 +515,9 @@ private fun ChartDetailRow(
                     )
                 }
             }
+            // 右側單顆「＋」：開啟選單（加入當前播放佇列／選擇播放清單）
             IconButton(onClick = onAdd) {
-                Icon(Icons.Filled.Add, contentDescription = "加入播放清單")
+                Icon(Icons.Filled.Add, contentDescription = "加入")
             }
         }
     }
@@ -521,7 +527,8 @@ private fun ChartDetailRow(
 @Composable
 fun DiscoverRoute(
     viewModel: DiscoverViewModel = hiltViewModel(),
-    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit
+    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
+    onAddToQueue: (VideoResult) -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
@@ -537,7 +544,8 @@ fun DiscoverRoute(
         snackbarHostState = snackbarHostState,
         onIntent = viewModel::onIntent,
         onCreatePlaylistAndAdd = viewModel::createPlaylistAndAdd,
-        onPlayChartQueue = onPlayChartQueue
+        onPlayChartQueue = onPlayChartQueue,
+        onAddToQueue = onAddToQueue
     )
 }
 
@@ -597,7 +605,8 @@ private fun DiscoverScreenSkeletonPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onCreatePlaylistAndAdd = { _, _ -> },
-            onPlayChartQueue = { _, _ -> }
+            onPlayChartQueue = { _, _ -> },
+            onAddToQueue = {}
         )
     }
 }
@@ -639,7 +648,8 @@ private fun DiscoverScreenRailPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onCreatePlaylistAndAdd = { _, _ -> },
-            onPlayChartQueue = { _, _ -> }
+            onPlayChartQueue = { _, _ -> },
+            onAddToQueue = {}
         )
     }
 }
@@ -714,7 +724,8 @@ private fun DiscoverScreenErrorPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onCreatePlaylistAndAdd = { _, _ -> },
-            onPlayChartQueue = { _, _ -> }
+            onPlayChartQueue = { _, _ -> },
+            onAddToQueue = {}
         )
     }
 }
@@ -757,7 +768,8 @@ private fun DiscoverScreenRecommendationRailPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onCreatePlaylistAndAdd = { _, _ -> },
-            onPlayChartQueue = { _, _ -> }
+            onPlayChartQueue = { _, _ -> },
+            onAddToQueue = {}
         )
     }
 }
@@ -795,7 +807,8 @@ private fun DiscoverScreenRecommendationEmptyPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onCreatePlaylistAndAdd = { _, _ -> },
-            onPlayChartQueue = { _, _ -> }
+            onPlayChartQueue = { _, _ -> },
+            onAddToQueue = {}
         )
     }
 }

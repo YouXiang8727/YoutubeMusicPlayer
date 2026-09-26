@@ -212,6 +212,12 @@ fun MyApp() {
                                 playerViewModel.onPlaybackIntent(
                                     PlaybackIntent.Play(video.videoId, video.title)
                                 )
+                            },
+                            // 加入播放佇列尾端（append-only，不中斷目前播放）
+                            onAddToQueue = { video ->
+                                playerViewModel.onPlaybackIntent(
+                                    PlaybackIntent.AddToQueue(video.videoId, video.title)
+                                )
                             }
                         )
                     }
@@ -221,6 +227,12 @@ fun MyApp() {
                             onPlayChartQueue = { entries, startIndex ->
                                 playerViewModel.onPlaybackIntent(
                                     PlaybackIntent.PlayList(entries, startIndex)
+                                )
+                            },
+                            // 單曲加入播放佇列尾端（append-only，不中斷目前播放）
+                            onAddToQueue = { video ->
+                                playerViewModel.onPlaybackIntent(
+                                    PlaybackIntent.AddToQueue(video.videoId, video.title)
                                 )
                             }
                         )
@@ -293,9 +305,22 @@ fun MyApp() {
             )
         }
 
+        // MiniPlayerBar 本身以 AnimatedVisibility(visible = playback.hasCurrent) 控制顯示；
+        // 若 hasCurrent 因「清空佇列」而變 false，面板會整個被移除，此時必須同步把
+        // isMiniPlayerExpanded 收回 false，否則 scrim 條件仍為 true → 全螢幕殘留灰色遮罩
+        // （且點擊會去「收起」一個已不可見的面板，狀態也不乾淨）。
+        // 這裡負責清狀態（下一個 frame 生效），下方 scrim 條件另有 hasCurrent 連動做同步防護。
+        LaunchedEffect(playback.hasCurrent) {
+            if (!playback.hasCurrent) {
+                isMiniPlayerExpanded = false
+            }
+        }
+
         // scrim：中間層（zIndex 1，低於 MiniPlayerBar、高於 Scaffold），
         // 全屏覆蓋內容與底部導覽列，點擊任一處收起展開面板。
-        if (isMiniPlayerExpanded) {
+        // 條件必須連動 playback.hasCurrent：hasCurrent 為 false 時 MiniPlayerBar 已不可見，
+        // 此時顯示 scrim 等於留下一個無主的全屏灰色遮罩。
+        if (isMiniPlayerExpanded && playback.hasCurrent) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

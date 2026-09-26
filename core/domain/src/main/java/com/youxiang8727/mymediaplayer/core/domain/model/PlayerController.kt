@@ -30,6 +30,15 @@ interface PlayerController {
      */
     fun playQueue(items: List<PlayQueueItem>, startIndex: Int)
 
+    /**
+     * 將單曲**追加到目前播放佇列的尾端**（append-only）。
+     *
+     * 不干擾正在播放的曲目：播放位置與隨機／循環模式皆不變動，
+     * 追加後的曲目會在目前曲目播完（或隨機抽中）時才輪到。
+     * 若目前沒有播放中的佇列（空佇列），語意等同 [play]——以該曲起播。
+     */
+    fun addToQueue(videoId: String, title: String)
+
     fun togglePlayPause()
 
     fun seekToNext()
