@@ -212,6 +212,12 @@ fun MyApp() {
                                 playerViewModel.onPlaybackIntent(
                                     PlaybackIntent.Play(video.videoId, video.title)
                                 )
+                            },
+                            // 加入播放佇列尾端（append-only，不中斷目前播放）
+                            onAddToQueue = { video ->
+                                playerViewModel.onPlaybackIntent(
+                                    PlaybackIntent.AddToQueue(video.videoId, video.title)
+                                )
                             }
                         )
                     }
@@ -221,6 +227,12 @@ fun MyApp() {
                             onPlayChartQueue = { entries, startIndex ->
                                 playerViewModel.onPlaybackIntent(
                                     PlaybackIntent.PlayList(entries, startIndex)
+                                )
+                            },
+                            // 單曲加入播放佇列尾端（append-only，不中斷目前播放）
+                            onAddToQueue = { video ->
+                                playerViewModel.onPlaybackIntent(
+                                    PlaybackIntent.AddToQueue(video.videoId, video.title)
                                 )
                             }
                         )

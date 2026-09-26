@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -67,7 +68,8 @@ fun DiscoverScreen(
     snackbarHostState: SnackbarHostState,
     onIntent: (DiscoverIntent) -> Unit,
     onCreatePlaylistAndAdd: (name: String, video: VideoResult) -> Unit,
-    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit
+    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
+    onAddToQueue: (VideoResult) -> Unit
 ) {
     // 顯示播放清單選擇 BottomSheet（帶影片資料）
     var showPickerVideo by remember { mutableStateOf<VideoResult?>(null) }
@@ -97,7 +99,8 @@ fun DiscoverScreen(
                     onBackToRail = { fullChartRegion = null },
                     onRetry = { onIntent(DiscoverIntent.TrendingRetry) },
                     onPlayChartQueue = onPlayChartQueue,
-                    onAdd = { showPickerVideo = it }
+                    onAdd = { showPickerVideo = it },
+                    onAddToQueue = onAddToQueue
                 )
             } else {
                 // 四區域 rail 並排：垂直 LazyColumn 承載，避免 4 條 rail 超出螢幕高度
@@ -111,7 +114,8 @@ fun DiscoverScreen(
                             recommendation = state.recommendation,
                             onRefresh = { onIntent(DiscoverIntent.RecommendationRefresh) },
                             onPlayQueue = onPlayChartQueue,
-                            onAdd = { showPickerVideo = it }
+                            onAdd = { showPickerVideo = it },
+                            onAddToQueue = onAddToQueue
                         )
                     }
                     items(ChartRegion.DISPLAY_ORDER) { region ->
@@ -123,7 +127,8 @@ fun DiscoverScreen(
                             onBackToRail = {},
                             onRetry = { onIntent(DiscoverIntent.TrendingRetry) },
                             onPlayChartQueue = onPlayChartQueue,
-                            onAdd = { showPickerVideo = it }
+                            onAdd = { showPickerVideo = it },
+                            onAddToQueue = onAddToQueue
                         )
                     }
                     item { Spacer(Modifier.height(24.dp)) }
@@ -194,7 +199,8 @@ private fun TrendingSection(
     onBackToRail: () -> Unit,
     onRetry: () -> Unit,
     onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
-    onAdd: (VideoResult) -> Unit
+    onAdd: (VideoResult) -> Unit,
+    onAddToQueue: (VideoResult) -> Unit
 ) {
     when {
         trending.loading -> VideoRailSkeleton(modifier = Modifier.fillMaxWidth())
@@ -245,13 +251,15 @@ private fun TrendingSection(
                 showFullChart -> ChartFullList(
                     items = trending.items,
                     onPlayChartQueue = onPlayChartQueue,
-                    onAdd = onAdd
+                    onAdd = onAdd,
+                    onAddToQueue = onAddToQueue
                 )
 
                 else -> ChartRail(
                     items = trending.items,
                     onPlayChartQueue = onPlayChartQueue,
-                    onAdd = onAdd
+                    onAdd = onAdd,
+                    onAddToQueue = onAddToQueue
                 )
             }
         }
@@ -271,7 +279,8 @@ private fun RecommendationSection(
     recommendation: RecommendationState,
     onRefresh: () -> Unit,
     onPlayQueue: (List<PlayQueueItem>, Int) -> Unit,
-    onAdd: (VideoResult) -> Unit
+    onAdd: (VideoResult) -> Unit,
+    onAddToQueue: (VideoResult) -> Unit
 ) {
     when {
         recommendation.loading -> VideoRailSkeleton(modifier = Modifier.fillMaxWidth())
@@ -318,7 +327,8 @@ private fun RecommendationSection(
                 else -> ChartRail(
                     items = recommendation.items,
                     onPlayChartQueue = onPlayQueue,
-                    onAdd = onAdd
+                    onAdd = onAdd,
+                    onAddToQueue = onAddToQueue
                 )
             }
         }
@@ -365,7 +375,8 @@ private fun TrendingError(
 private fun ChartRail(
     items: List<VideoResult>,
     onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
-    onAdd: (VideoResult) -> Unit
+    onAdd: (VideoResult) -> Unit,
+    onAddToQueue: (VideoResult) -> Unit
 ) {
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -379,7 +390,8 @@ private fun ChartRail(
                     // 以「整份榜單」為佇列從該曲起播（rail 只顯示前 N 筆，佇列仍是完整清單）
                     onPlayChartQueue(items.map { it.toPlayQueueItem() }, index)
                 },
-                onAdd = { onAdd(video) }
+                onAdd = { onAdd(video) },
+                onAddToQueue = { onAddToQueue(video) }
             )
         }
     }
@@ -390,7 +402,8 @@ private fun ChartRail(
 private fun ChartFullList(
     items: List<VideoResult>,
     onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
-    onAdd: (VideoResult) -> Unit
+    onAdd: (VideoResult) -> Unit,
+    onAddToQueue: (VideoResult) -> Unit
 ) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -400,7 +413,8 @@ private fun ChartFullList(
             ChartDetailRow(
                 video = video,
                 onClick = { onPlayChartQueue(items.map { it.toPlayQueueItem() }, index) },
-                onAdd = { onAdd(video) }
+                onAdd = { onAdd(video) },
+                onAddToQueue = { onAddToQueue(video) }
             )
         }
         item { Spacer(Modifier.height(24.dp)) }
@@ -411,7 +425,8 @@ private fun ChartFullList(
 private fun ChartRailItem(
     video: VideoResult,
     onClick: () -> Unit,
-    onAdd: () -> Unit
+    onAdd: () -> Unit,
+    onAddToQueue: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -425,7 +440,7 @@ private fun ChartRailItem(
                 .fillMaxWidth()
                 .height(80.dp)
         ) {
-            // 右下角：時長 badge 與「加入播放清單」並排
+            // 右下角：時長 badge、「加入佇列」與「加入播放清單」並排
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -435,6 +450,22 @@ private fun ChartRailItem(
             ) {
                 DurationBadge(duration = video.duration)
                 // 獨立可點擊區域（在整卡 onClick 之前攔截），疊於縮圖右下角。
+                // 左「加入佇列」／右「加入播放清單」：tertiary 色區隔兩種語意。
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+                        .clickable(onClick = onAddToQueue),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.List,
+                        contentDescription = "加入佇列",
+                        tint = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .size(24.dp)
@@ -475,7 +506,8 @@ private fun ChartRailItem(
 private fun ChartDetailRow(
     video: VideoResult,
     onClick: () -> Unit,
-    onAdd: () -> Unit
+    onAdd: () -> Unit,
+    onAddToQueue: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -510,6 +542,14 @@ private fun ChartDetailRow(
                     )
                 }
             }
+            // 右側兩顆並排：左「加入佇列」（播放佇列尾端）／右「加入播放清單」（存成清單）
+            IconButton(onClick = onAddToQueue) {
+                Icon(
+                    Icons.AutoMirrored.Filled.List,
+                    contentDescription = "加入佇列",
+                    tint = MaterialTheme.colorScheme.tertiary
+                )
+            }
             IconButton(onClick = onAdd) {
                 Icon(Icons.Filled.Add, contentDescription = "加入播放清單")
             }
@@ -521,7 +561,8 @@ private fun ChartDetailRow(
 @Composable
 fun DiscoverRoute(
     viewModel: DiscoverViewModel = hiltViewModel(),
-    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit
+    onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
+    onAddToQueue: (VideoResult) -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
@@ -537,7 +578,8 @@ fun DiscoverRoute(
         snackbarHostState = snackbarHostState,
         onIntent = viewModel::onIntent,
         onCreatePlaylistAndAdd = viewModel::createPlaylistAndAdd,
-        onPlayChartQueue = onPlayChartQueue
+        onPlayChartQueue = onPlayChartQueue,
+        onAddToQueue = onAddToQueue
     )
 }
 
@@ -597,7 +639,8 @@ private fun DiscoverScreenSkeletonPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onCreatePlaylistAndAdd = { _, _ -> },
-            onPlayChartQueue = { _, _ -> }
+            onPlayChartQueue = { _, _ -> },
+            onAddToQueue = {}
         )
     }
 }
@@ -639,7 +682,8 @@ private fun DiscoverScreenRailPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onCreatePlaylistAndAdd = { _, _ -> },
-            onPlayChartQueue = { _, _ -> }
+            onPlayChartQueue = { _, _ -> },
+            onAddToQueue = {}
         )
     }
 }
@@ -674,7 +718,8 @@ private fun DiscoverScreenFullChartPreview() {
             onBackToRail = {},
             onRetry = {},
             onPlayChartQueue = { _, _ -> },
-            onAdd = {}
+            onAdd = {},
+            onAddToQueue = {}
         )
     }
 }
@@ -714,7 +759,8 @@ private fun DiscoverScreenErrorPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onCreatePlaylistAndAdd = { _, _ -> },
-            onPlayChartQueue = { _, _ -> }
+            onPlayChartQueue = { _, _ -> },
+            onAddToQueue = {}
         )
     }
 }
@@ -757,7 +803,8 @@ private fun DiscoverScreenRecommendationRailPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onCreatePlaylistAndAdd = { _, _ -> },
-            onPlayChartQueue = { _, _ -> }
+            onPlayChartQueue = { _, _ -> },
+            onAddToQueue = {}
         )
     }
 }
@@ -795,7 +842,8 @@ private fun DiscoverScreenRecommendationEmptyPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onCreatePlaylistAndAdd = { _, _ -> },
-            onPlayChartQueue = { _, _ -> }
+            onPlayChartQueue = { _, _ -> },
+            onAddToQueue = {}
         )
     }
 }

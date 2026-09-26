@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
@@ -61,6 +62,7 @@ fun SearchScreen(
     snackbarHostState: SnackbarHostState,
     onIntent: (SearchIntent) -> Unit,
     onPlayVideo: (VideoResult) -> Unit,
+    onAddToQueue: (VideoResult) -> Unit,
     onCreatePlaylistAndAdd: (name: String, video: VideoResult) -> Unit
 ) {
     // 顯示播放清單選擇 BottomSheet（帶影片資料）
@@ -194,7 +196,8 @@ fun SearchScreen(
                         VideoCard(
                             video = video,
                             onClick = { onPlayVideo(video) },
-                            onAdd = { showPickerVideo = video }
+                            onAdd = { showPickerVideo = video },
+                            onAddToQueue = { onAddToQueue(video) }
                         )
                     }
                     item {
@@ -294,7 +297,8 @@ private fun SuggestionList(
 private fun VideoCard(
     video: VideoResult,
     onClick: () -> Unit,
-    onAdd: () -> Unit
+    onAdd: () -> Unit,
+    onAddToQueue: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -327,6 +331,14 @@ private fun VideoCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+            }
+            // 右側兩顆並排：左「加入佇列」（播放佇列尾端）／右「加入播放清單」（存成清單）
+            IconButton(onClick = onAddToQueue) {
+                Icon(
+                    Icons.AutoMirrored.Filled.List,
+                    contentDescription = "加入佇列",
+                    tint = MaterialTheme.colorScheme.tertiary
+                )
             }
             IconButton(onClick = onAdd) {
                 Icon(Icons.Filled.Add, contentDescription = "加入播放清單")
@@ -376,7 +388,8 @@ internal fun LoadMoreFooter(
 @Composable
 fun SearchRoute(
     viewModel: SearchViewModel = hiltViewModel(),
-    onPlayVideo: (VideoResult) -> Unit
+    onPlayVideo: (VideoResult) -> Unit,
+    onAddToQueue: (VideoResult) -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
@@ -392,6 +405,7 @@ fun SearchRoute(
         snackbarHostState = snackbarHostState,
         onIntent = viewModel::onIntent,
         onPlayVideo = onPlayVideo,
+        onAddToQueue = onAddToQueue,
         onCreatePlaylistAndAdd = viewModel::createPlaylistAndAdd
     )
 }
@@ -423,6 +437,7 @@ private fun SearchScreenEmptyPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onPlayVideo = {},
+            onAddToQueue = {},
             onCreatePlaylistAndAdd = { _, _ -> }
         )
     }
@@ -463,6 +478,7 @@ private fun SearchScreenSuggestionsPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onPlayVideo = {},
+            onAddToQueue = {},
             onCreatePlaylistAndAdd = { _, _ -> }
         )
     }
@@ -505,6 +521,7 @@ private fun SearchScreenResultsPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onPlayVideo = {},
+            onAddToQueue = {},
             onCreatePlaylistAndAdd = { _, _ -> }
         )
     }
@@ -547,6 +564,7 @@ private fun SearchScreenResultsLoadMorePreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onPlayVideo = {},
+            onAddToQueue = {},
             onCreatePlaylistAndAdd = { _, _ -> }
         )
     }
@@ -590,6 +608,7 @@ private fun SearchScreenResultsLoadingMorePreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onPlayVideo = {},
+            onAddToQueue = {},
             onCreatePlaylistAndAdd = { _, _ -> }
         )
     }
@@ -625,6 +644,7 @@ private fun SearchScreenHistoryPreview() {
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onPlayVideo = {},
+            onAddToQueue = {},
             onCreatePlaylistAndAdd = { _, _ -> }
         )
     }
