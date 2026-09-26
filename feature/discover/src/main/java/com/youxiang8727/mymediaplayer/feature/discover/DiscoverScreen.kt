@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -99,8 +98,7 @@ fun DiscoverScreen(
                     onBackToRail = { fullChartRegion = null },
                     onRetry = { onIntent(DiscoverIntent.TrendingRetry) },
                     onPlayChartQueue = onPlayChartQueue,
-                    onAdd = { showPickerVideo = it },
-                    onAddToQueue = onAddToQueue
+                    onAdd = { showPickerVideo = it }
                 )
             } else {
                 // 四區域 rail 並排：垂直 LazyColumn 承載，避免 4 條 rail 超出螢幕高度
@@ -114,8 +112,7 @@ fun DiscoverScreen(
                             recommendation = state.recommendation,
                             onRefresh = { onIntent(DiscoverIntent.RecommendationRefresh) },
                             onPlayQueue = onPlayChartQueue,
-                            onAdd = { showPickerVideo = it },
-                            onAddToQueue = onAddToQueue
+                            onAdd = { showPickerVideo = it }
                         )
                     }
                     items(ChartRegion.DISPLAY_ORDER) { region ->
@@ -127,8 +124,7 @@ fun DiscoverScreen(
                             onBackToRail = {},
                             onRetry = { onIntent(DiscoverIntent.TrendingRetry) },
                             onPlayChartQueue = onPlayChartQueue,
-                            onAdd = { showPickerVideo = it },
-                            onAddToQueue = onAddToQueue
+                            onAdd = { showPickerVideo = it }
                         )
                     }
                     item { Spacer(Modifier.height(24.dp)) }
@@ -151,7 +147,11 @@ fun DiscoverScreen(
                 showPickerVideo = null
                 showCreateDialog = true
             },
-            onDismiss = { showPickerVideo = null }
+            onDismiss = { showPickerVideo = null },
+            onAddToQueue = {
+                onAddToQueue(video)
+                showPickerVideo = null
+            }
         )
     }
 
@@ -199,8 +199,7 @@ private fun TrendingSection(
     onBackToRail: () -> Unit,
     onRetry: () -> Unit,
     onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
-    onAdd: (VideoResult) -> Unit,
-    onAddToQueue: (VideoResult) -> Unit
+    onAdd: (VideoResult) -> Unit
 ) {
     when {
         trending.loading -> VideoRailSkeleton(modifier = Modifier.fillMaxWidth())
@@ -251,15 +250,13 @@ private fun TrendingSection(
                 showFullChart -> ChartFullList(
                     items = trending.items,
                     onPlayChartQueue = onPlayChartQueue,
-                    onAdd = onAdd,
-                    onAddToQueue = onAddToQueue
+                    onAdd = onAdd
                 )
 
                 else -> ChartRail(
                     items = trending.items,
                     onPlayChartQueue = onPlayChartQueue,
-                    onAdd = onAdd,
-                    onAddToQueue = onAddToQueue
+                    onAdd = onAdd
                 )
             }
         }
@@ -279,8 +276,7 @@ private fun RecommendationSection(
     recommendation: RecommendationState,
     onRefresh: () -> Unit,
     onPlayQueue: (List<PlayQueueItem>, Int) -> Unit,
-    onAdd: (VideoResult) -> Unit,
-    onAddToQueue: (VideoResult) -> Unit
+    onAdd: (VideoResult) -> Unit
 ) {
     when {
         recommendation.loading -> VideoRailSkeleton(modifier = Modifier.fillMaxWidth())
@@ -327,8 +323,7 @@ private fun RecommendationSection(
                 else -> ChartRail(
                     items = recommendation.items,
                     onPlayChartQueue = onPlayQueue,
-                    onAdd = onAdd,
-                    onAddToQueue = onAddToQueue
+                    onAdd = onAdd
                 )
             }
         }
@@ -375,8 +370,7 @@ private fun TrendingError(
 private fun ChartRail(
     items: List<VideoResult>,
     onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
-    onAdd: (VideoResult) -> Unit,
-    onAddToQueue: (VideoResult) -> Unit
+    onAdd: (VideoResult) -> Unit
 ) {
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -390,8 +384,7 @@ private fun ChartRail(
                     // 以「整份榜單」為佇列從該曲起播（rail 只顯示前 N 筆，佇列仍是完整清單）
                     onPlayChartQueue(items.map { it.toPlayQueueItem() }, index)
                 },
-                onAdd = { onAdd(video) },
-                onAddToQueue = { onAddToQueue(video) }
+                onAdd = { onAdd(video) }
             )
         }
     }
@@ -402,8 +395,7 @@ private fun ChartRail(
 private fun ChartFullList(
     items: List<VideoResult>,
     onPlayChartQueue: (List<PlayQueueItem>, Int) -> Unit,
-    onAdd: (VideoResult) -> Unit,
-    onAddToQueue: (VideoResult) -> Unit
+    onAdd: (VideoResult) -> Unit
 ) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -413,8 +405,7 @@ private fun ChartFullList(
             ChartDetailRow(
                 video = video,
                 onClick = { onPlayChartQueue(items.map { it.toPlayQueueItem() }, index) },
-                onAdd = { onAdd(video) },
-                onAddToQueue = { onAddToQueue(video) }
+                onAdd = { onAdd(video) }
             )
         }
         item { Spacer(Modifier.height(24.dp)) }
@@ -425,8 +416,7 @@ private fun ChartFullList(
 private fun ChartRailItem(
     video: VideoResult,
     onClick: () -> Unit,
-    onAdd: () -> Unit,
-    onAddToQueue: () -> Unit
+    onAdd: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -440,7 +430,7 @@ private fun ChartRailItem(
                 .fillMaxWidth()
                 .height(80.dp)
         ) {
-            // 右下角：時長 badge、「加入佇列」與「加入播放清單」並排
+            // 右下角：時長 badge ＋ 單顆「＋」badge（開啟加入選單）
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -450,22 +440,6 @@ private fun ChartRailItem(
             ) {
                 DurationBadge(duration = video.duration)
                 // 獨立可點擊區域（在整卡 onClick 之前攔截），疊於縮圖右下角。
-                // 左「加入佇列」／右「加入播放清單」：tertiary 色區隔兩種語意。
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clip(MaterialTheme.shapes.small)
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
-                        .clickable(onClick = onAddToQueue),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.List,
-                        contentDescription = "加入佇列",
-                        tint = MaterialTheme.colorScheme.tertiary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
                 Box(
                     modifier = Modifier
                         .size(24.dp)
@@ -476,7 +450,7 @@ private fun ChartRailItem(
                 ) {
                     Icon(
                         Icons.Filled.Add,
-                        contentDescription = "加入播放清單",
+                        contentDescription = "加入",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
                     )
@@ -506,8 +480,7 @@ private fun ChartRailItem(
 private fun ChartDetailRow(
     video: VideoResult,
     onClick: () -> Unit,
-    onAdd: () -> Unit,
-    onAddToQueue: () -> Unit
+    onAdd: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -542,16 +515,9 @@ private fun ChartDetailRow(
                     )
                 }
             }
-            // 右側兩顆並排：左「加入佇列」（播放佇列尾端）／右「加入播放清單」（存成清單）
-            IconButton(onClick = onAddToQueue) {
-                Icon(
-                    Icons.AutoMirrored.Filled.List,
-                    contentDescription = "加入佇列",
-                    tint = MaterialTheme.colorScheme.tertiary
-                )
-            }
+            // 右側單顆「＋」：開啟選單（加入當前播放佇列／選擇播放清單）
             IconButton(onClick = onAdd) {
-                Icon(Icons.Filled.Add, contentDescription = "加入播放清單")
+                Icon(Icons.Filled.Add, contentDescription = "加入")
             }
         }
     }
@@ -718,8 +684,7 @@ private fun DiscoverScreenFullChartPreview() {
             onBackToRail = {},
             onRetry = {},
             onPlayChartQueue = { _, _ -> },
-            onAdd = {},
-            onAddToQueue = {}
+            onAdd = {}
         )
     }
 }

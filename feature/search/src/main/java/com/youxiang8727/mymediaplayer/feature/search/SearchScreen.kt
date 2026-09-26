@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
@@ -196,8 +195,7 @@ fun SearchScreen(
                         VideoCard(
                             video = video,
                             onClick = { onPlayVideo(video) },
-                            onAdd = { showPickerVideo = video },
-                            onAddToQueue = { onAddToQueue(video) }
+                            onAdd = { showPickerVideo = video }
                         )
                     }
                     item {
@@ -227,7 +225,11 @@ fun SearchScreen(
                 showPickerVideo = null
                 showCreateDialog = true
             },
-            onDismiss = { showPickerVideo = null }
+            onDismiss = { showPickerVideo = null },
+            onAddToQueue = {
+                onAddToQueue(video)
+                showPickerVideo = null
+            }
         )
     }
 
@@ -297,8 +299,7 @@ private fun SuggestionList(
 private fun VideoCard(
     video: VideoResult,
     onClick: () -> Unit,
-    onAdd: () -> Unit,
-    onAddToQueue: () -> Unit
+    onAdd: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -332,16 +333,9 @@ private fun VideoCard(
                     )
                 }
             }
-            // 右側兩顆並排：左「加入佇列」（播放佇列尾端）／右「加入播放清單」（存成清單）
-            IconButton(onClick = onAddToQueue) {
-                Icon(
-                    Icons.AutoMirrored.Filled.List,
-                    contentDescription = "加入佇列",
-                    tint = MaterialTheme.colorScheme.tertiary
-                )
-            }
+            // 右側單顆「＋」：開啟選單（加入當前播放佇列／選擇播放清單）
             IconButton(onClick = onAdd) {
-                Icon(Icons.Filled.Add, contentDescription = "加入播放清單")
+                Icon(Icons.Filled.Add, contentDescription = "加入")
             }
         }
     }
