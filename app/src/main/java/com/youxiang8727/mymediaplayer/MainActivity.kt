@@ -56,6 +56,7 @@ import com.youxiang8727.mymediaplayer.feature.discover.DiscoverRoute
 import com.youxiang8727.mymediaplayer.feature.player.MiniPlayerBar
 import com.youxiang8727.mymediaplayer.feature.player.PlaybackIntent
 import com.youxiang8727.mymediaplayer.feature.player.PlayerViewModel
+import com.youxiang8727.mymediaplayer.feature.playlist.CreatePlaylistDialog
 import com.youxiang8727.mymediaplayer.feature.playlist.PlaylistDetailRoute
 import com.youxiang8727.mymediaplayer.feature.playlist.PlaylistListRoute
 import com.youxiang8727.mymediaplayer.feature.search.SearchRoute
@@ -139,6 +140,21 @@ fun MyApp() {
         }
     }
 
+    // 「存為播放清單」：由 MiniPlayerBar 展開面板的按鈕觸發，於容器層開 Dialog。
+    // Dialog 掛在 Box 層級（與 MiniPlayerBar 同級、非 Scaffold 內）——面板展開時
+    // MiniPlayerBar 為 zIndex(2f) 且其 scrim 為 zIndex(1f)，Dialog 若置於面板內
+    // 會被面板的層級與 scrim 影響顯示。
+    // 開啟前先收面板：兩者都是全螢幕層級，同時可見會互相遮蔽。
+    var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+
+    // PlayerViewModel.messages 為 replay=0 的 SharedFlow，**必須在畫面層常駐收集**：
+    // 若改成在 onSaveAsPlaylist 的 lambda 裡臨時 collect，會漏掉自己剛發出的訊息
+    // （emit 早於 collect 上線）。與 search/discover/playlist 的接線方式相同。
+    val playlistNames by playerViewModel.playlistNames.collectAsState()
+    LaunchedEffect(Unit) {
+        playerViewModel.messages.collect { snackbarHostState.showSnackbar(it) }
+    }
+
     // 頂層目的地（搜尋／探索／播放清單）顯示底部導航列；播放清單詳情頁保留（階層 nav）
     val showBottomBar = currentRoute == Routes.SEARCH ||
             currentRoute == Routes.DISCOVER ||
@@ -147,7 +163,9 @@ fun MyApp() {
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
-            snackbarHost = { SnackbarHost(snackbarHostState) },
+            // SnackbarHost 已移出至本 Box 末段（zIndex 3f）——留空，
+            // 原因見該處註解：置於 Scaffold 內會被 MiniPlayerBar 遮蔽。
+            snackbarHost = {},
             bottomBar = {
                 // 底部導覽列留在 Scaffold：展開 MiniPlayerBar 時會被 scrim 蓋住（modal 行為）
                 if (showBottomBar) {
@@ -300,7 +318,13 @@ fun MyApp() {
                     playerViewModel.onPlaybackIntent(PlaybackIntent.ClearQueue)
                 },
                 onSaveAsPlaylist = {
-                    // TODO: 存為播放清單（S2 工作項實作）
+                    // 雙重把關：按鈕本身已 enabled = queue.isNotEmpty()，此處再確認一次
+                    // 以防某些路徑（旋轉、佇列被清）在觸發時已空——那時開 Dialog 只會讓
+                    // 使用者輸完名字才得到「播放佇列為空」。空佇列的失敗文案由 domain 層負責。
+                    if (queue.isNotEmpty()) {
+                        isMiniPlayerExpanded = false
+                        showCreatePlaylistDialog = true
+                    }
                 }
             )
         }
@@ -329,5 +353,43 @@ fun MyApp() {
                     .zIndex(1f)
             )
         }
+
+        // 建立播放清單 Dialog（feature:playlist 的共用元件；feature:player 已依賴它）。
+        // 置於 Box 層級且在 AnimatedVisibility(scrim/MiniPlayerBar) **之外**：Dialog 是
+        // 自己的全螢幕視窗層，若被包進面板會被面板的 zIndex 與 scrim 影響顯示。
+        // existingNames 取自 PlayerViewModel.playlistNames，提供與其他頁面一致的重名即時防呆
+        // （domain 層仍有 PlaylistNameConflictException 作為第二道防線）。
+        if (showCreatePlaylistDialog) {
+            CreatePlaylistDialog(
+                existingNames = playlistNames,
+                onConfirm = { name ->
+                    playerViewModel.onPlaybackIntent(PlaybackIntent.SaveQueueAsPlaylist(name))
+                },
+                onDismiss = { showCreatePlaylistDialog = false }
+            )
+        }
+
+        // SnackbarHost：最高層（zIndex 3f，**必須在 Scaffold 之外**）。
+        // 2026-09-26 實機驗證發現：原本放在 Scaffold(snackbarHost = ...) 內時
+        // 「存為播放清單」建立成功卻完全看不到提示。原因是層級 + 位置雙重因素——
+        // ① MiniPlayerBar 為 zIndex(2f)、Scaffold 為 0，後者（含其內的 SnackbarHost）
+        //    繪製在 MiniPlayerBar **之下**；
+        // ② Material3 Scaffold 將 snackbar 排在 bottomBar 之上（≈ navigationBarHeight），
+        //    而 MiniPlayerBar 亦為 BottomCenter + padding(bottom = navigationBarHeight)
+        //    ——兩者垂直位置重疊，故 snackbar 被整個蓋住。
+        // 影響範圍不限本功能：同一 snackbarHostState 也承載 playback.errorMessage
+        // （播放失敗提示），推測同樣被遮蔽而長期未察覺，本次一併修正。
+        // padding 手動施加（原本由 Scaffold 依 bottomBar 高度自動施加）：
+        // 播放中疊在 MiniPlayerBar 上方、不遮蔽它；未播放時貼在導覽列上方。
+        val snackbarBottomPadding =
+            if (playback.hasCurrent) navigationBarHeight + miniPlayerOverlayHeight
+            else navigationBarHeight
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = snackbarBottomPadding)
+                .zIndex(3f)
+        )
     }
 }
