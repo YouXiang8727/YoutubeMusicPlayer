@@ -242,6 +242,11 @@ class MusicService : MediaSessionService() {
                 }
                 if (entries.isEmpty()) stopSelf() else handlePlayQueue(entries, startIndex)
             }
+            ACTION_ADD_TO_QUEUE -> {
+                val videoId = intent.getStringExtra(EXTRA_VIDEO_ID).orEmpty()
+                val title = intent.getStringExtra(EXTRA_TITLE) ?: videoId
+                if (videoId.isBlank()) stopSelf() else handleAddToQueue(videoId, title)
+            }
             ACTION_STOP -> {
                 player?.stop()
                 stopSelf()
@@ -272,6 +277,26 @@ class MusicService : MediaSessionService() {
     private fun handlePlayQueue(entries: List<PlayQueueItem>, startIndex: Int) {
         val queue = PlaybackQueueBuilder.buildFromEntries(entries, startIndex)
         loadQueueAndPlay(queue)
+    }
+
+    /**
+     * 將單曲追加到**目前播放佇列尾端**（append-only）：
+     * - player 尚未建立 → no-op（controller 尚未 connect；startForegroundService 已觸發 onCreate）。
+     * - 佇列為空 → 語意等同 [handlePlay]（以該曲起播），對齊 PlayerController.addToQueue 契約。
+     * - 佇列非空 → [ExoPlayer.addMediaItem] 只在尾端追加，不移動 currentIndex，
+     *   故不中斷目前曲目、不改播放位置；shuffle/repeat 亦原封不動。
+     */
+    private fun handleAddToQueue(videoId: String, title: String) {
+        val p = player ?: return
+        if (p.mediaItemCount == 0) {
+            handlePlay(videoId, title)
+            return
+        }
+        val entry = PlaybackQueueBuilder.QueueEntry(
+            videoId = videoId,
+            title = title.ifBlank { videoId }
+        )
+        p.addMediaItem(entry.toMediaItem())
     }
 
     /** 兩條路徑共用的佇列載入：setMediaItems + seekTo(start,0) + 保留 shuffle/repeat + prepare + play。 */
@@ -546,6 +571,7 @@ class MusicService : MediaSessionService() {
         const val NOTIFICATION_ID = 1001
         const val ACTION_PLAY = "com.youxiang8727.mymediaplayer.action.PLAY"
         const val ACTION_PLAY_QUEUE = "com.youxiang8727.mymediaplayer.action.PLAY_QUEUE"
+        const val ACTION_ADD_TO_QUEUE = "com.youxiang8727.mymediaplayer.action.ADD_TO_QUEUE"
         const val ACTION_STOP = "com.youxiang8727.mymediaplayer.action.STOP"
         const val COMMAND_TOGGLE_SHUFFLE = "com.youxiang8727.mymediaplayer.command.TOGGLE_SHUFFLE"
         const val COMMAND_CYCLE_REPEAT = "com.youxiang8727.mymediaplayer.command.CYCLE_REPEAT"
