@@ -17,3 +17,26 @@ data class PlayQueueItem(
 )
 
 fun VideoResult.toPlayQueueItem() = PlayQueueItem(videoId = videoId, title = title)
+
+/**
+ * 播放佇列項目 → 播放清單項目（持久化面）的欄位對應。
+ *
+ * **分工**：本 mapper 只做「一個欄位到另一個欄位」的映射；**順序規則不屬於此處**。
+ * `playlist_items` 以 `addedAt DESC` 讀取（最新在前），與佇列的播放順序相反，
+ * 故「如何排列 addedAt 才能還原佇列順序」是**領域規則**，由呼叫端
+ * （[com.youxiang8727.mymediaplayer.core.domain.usecase.SaveQueueAsPlaylistUseCase]）
+ * 計算後經 [addedAt] 參數傳入，避免映射邏輯與排序策略糾結。
+ *
+ * 縮圖固定為空字串：[PlayQueueItem] 不帶縮圖資訊（MediaItem 層已丟棄 artwork），
+ * UI 對空 url 以色塊佔位顯示。
+ */
+fun PlayQueueItem.toPlaylistItem(
+    playlistId: Long = 0L,
+    addedAt: Long = System.currentTimeMillis()
+) = PlaylistItem(
+    videoId = videoId,
+    title = title,
+    thumbnailUrl = "",
+    playlistId = playlistId,
+    addedAt = addedAt
+)

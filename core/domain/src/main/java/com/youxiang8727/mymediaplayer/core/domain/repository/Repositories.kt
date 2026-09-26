@@ -38,6 +38,24 @@ interface PlaylistRepository {
     suspend fun getRandomItem(playlistId: Long): PlaylistItem?
 
     /**
+     * 建立歌單並**批次**加入 [items]，整段為**單一交易**；回傳新歌單 id。
+     *
+     * 為何不讓呼叫端自行 `createPlaylist` 後迴圈 `addItem`：那樣會是 N 次非交易寫入，
+     * 中途失敗會留下「歌單已建立但項目不完整」的半成品狀態。
+     *
+     * 語意細節：
+     * - [items] 的 [PlaylistItem.playlistId] **不需**預先設定（傳 `0L` 即可），
+     *   實作會以實際新歌單 id 覆寫後才寫入。
+     * - 項目順序由呼叫端以 [PlaylistItem.addedAt] 表達（讀取端為 `addedAt DESC`）。
+     * - [items] 為空時**仍會建立空歌單**（「建立空歌單」本身是合法操作）；
+     *   「佇列為空不該存」的判斷屬於領域規則，請於呼叫前判斷。
+     *
+     * @throws com.youxiang8727.mymediaplayer.core.domain.usecase.PlaylistNameConflictException
+     *         [name] 與既有歌單重名（不建立任何項目）。
+     */
+    suspend fun createPlaylistWithItems(name: String, items: List<PlaylistItem>): Long
+
+    /**
      * 標記某曲「播放失敗」。記錄時間戳至 [PlaylistItem.streamFailedAt]，
      * 供播放清單 UI 顯示錯誤標記。videoId 為 playlist_items 全域主鍵，不需 playlistId。
      */

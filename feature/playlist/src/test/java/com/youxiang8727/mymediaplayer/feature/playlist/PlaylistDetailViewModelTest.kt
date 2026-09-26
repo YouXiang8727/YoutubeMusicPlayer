@@ -81,6 +81,7 @@ class PlaylistDetailViewModelTest {
         override suspend fun removeItem(playlistId: Long, videoId: String) {}
         override suspend fun clearPlaylist(playlistId: Long) {}
         override suspend fun getRandomItem(playlistId: Long): PlaylistItem? = null
+        override suspend fun createPlaylistWithItems(name: String, items: List<PlaylistItem>): Long = 1L
         override suspend fun markStreamFailed(videoId: String, failedAt: Long) {}
         override suspend fun clearStreamFailed(videoId: String) {}
         override fun observeRecentItems(limit: Int): Flow<List<PlaylistItem>> = flowOf(emptyList())
