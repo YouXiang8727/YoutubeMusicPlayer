@@ -10,6 +10,7 @@
 ## [Unreleased]
 
 ### Added
+- **搜尋／熱門榜單卡片新增「加入佇列」尾端追加**（`feature:player`／`feature:search`／`feature:discover`，2026-09）：`core:domain` `PlayerController` 新增 `addToQueue(videoId, title)` 契約（Controller 只做 `ACTION_ADD_TO_QUEUE` Intent 轉送，append 統一由 MusicService 端 `player.addMediaItem` 處理——不中斷目前曲目、不改播放位置與 shuffle/repeat；佇列為空時語意等同 `play` 起播）。`PlayerViewModel` 新增 `PlaybackIntent.AddToQueue`。`feature:search` `VideoCard` 與 `feature:discover` `ChartRailItem`／`ChartDetailRow` 於「加入播放清單」旁並排新增 `List` IconButton（contentDescription「加入佇列」、tint tertiary 區隔），由 `SearchRoute(onAddToQueue)`／`DiscoverRoute(onAddToQueue)` 經 app 容器層接線至 `PlaybackIntent.AddToQueue`
 - **MiniPlayerBar 可拖曳展開至螢幕 50% 高度顯示播放佇列**（`feature:player`，2026-09）：
   - `core:domain` `PlayerController` 新增 `queue: StateFlow<List<PlayQueueItem>>`、`seekToIndex(index)`、`removeFromQueue(index)`、`clearQueue()` 四項契約；`feature:player` `MediaControllerPlayerController` 實作佇列觀察（`onPlaylistMetadataChanged`/`onMediaItemTransition` → `getMediaItemCount()`/`getMediaItemAt()` 轉換為 `PlayQueueItem` 列表）與佇列操作（`seekTo(index, 0L)`、`removeMediaItem`、`clearMediaItems`）。
   - `PlayerViewModel` 暴露 `queue` 並新增 `PlaybackIntent.SeekToIndex`／`RemoveFromQueue`／`ClearQueue`。
