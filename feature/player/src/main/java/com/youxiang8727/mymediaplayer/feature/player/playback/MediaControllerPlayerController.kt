@@ -156,6 +156,15 @@ class MediaControllerPlayerController @Inject constructor(
             isPlaying = isPlaying,
             positionMs = contentPosition.coerceAtLeast(0L),
             durationMs = if (contentDuration == C.TIME_UNSET) 0L else contentDuration,
+            // 必須以 hasCurrent 門控：Media3 的 currentMediaItemIndex 在 STATE_IDLE 時
+            // 仍可能 >= 0（見下方 removeFromQueue 註解所述現象），直接透傳會讓
+            // 「無目前播放項」的快照帶著看似有效的索引，違反 domain 的不變式
+            // 「hasCurrent == false 時 currentMediaItemIndex 必為 NO_CURRENT_INDEX」。
+            currentMediaItemIndex = if (hasCurrent) {
+                this.currentMediaItemIndex.coerceAtLeast(PlaybackSnapshot.NO_CURRENT_INDEX)
+            } else {
+                PlaybackSnapshot.NO_CURRENT_INDEX
+            },
             shuffleEnabled = shuffleModeEnabled,
             repeatMode = if (repeatMode == Player.REPEAT_MODE_ONE) RepeatMode.ONE else RepeatMode.ALL,
             errorMessage = errorMessage
