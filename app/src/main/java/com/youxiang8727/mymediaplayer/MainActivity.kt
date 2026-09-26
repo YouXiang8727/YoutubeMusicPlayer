@@ -163,7 +163,9 @@ fun MyApp() {
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
-            snackbarHost = { SnackbarHost(snackbarHostState) },
+            // SnackbarHost 已移出至本 Box 末段（zIndex 3f）——留空，
+            // 原因見該處註解：置於 Scaffold 內會被 MiniPlayerBar 遮蔽。
+            snackbarHost = {},
             bottomBar = {
                 // 底部導覽列留在 Scaffold：展開 MiniPlayerBar 時會被 scrim 蓋住（modal 行為）
                 if (showBottomBar) {
@@ -366,5 +368,28 @@ fun MyApp() {
                 onDismiss = { showCreatePlaylistDialog = false }
             )
         }
+
+        // SnackbarHost：最高層（zIndex 3f，**必須在 Scaffold 之外**）。
+        // 2026-09-26 實機驗證發現：原本放在 Scaffold(snackbarHost = ...) 內時
+        // 「存為播放清單」建立成功卻完全看不到提示。原因是層級 + 位置雙重因素——
+        // ① MiniPlayerBar 為 zIndex(2f)、Scaffold 為 0，後者（含其內的 SnackbarHost）
+        //    繪製在 MiniPlayerBar **之下**；
+        // ② Material3 Scaffold 將 snackbar 排在 bottomBar 之上（≈ navigationBarHeight），
+        //    而 MiniPlayerBar 亦為 BottomCenter + padding(bottom = navigationBarHeight)
+        //    ——兩者垂直位置重疊，故 snackbar 被整個蓋住。
+        // 影響範圍不限本功能：同一 snackbarHostState 也承載 playback.errorMessage
+        // （播放失敗提示），推測同樣被遮蔽而長期未察覺，本次一併修正。
+        // padding 手動施加（原本由 Scaffold 依 bottomBar 高度自動施加）：
+        // 播放中疊在 MiniPlayerBar 上方、不遮蔽它；未播放時貼在導覽列上方。
+        val snackbarBottomPadding =
+            if (playback.hasCurrent) navigationBarHeight + miniPlayerOverlayHeight
+            else navigationBarHeight
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = snackbarBottomPadding)
+                .zIndex(3f)
+        )
     }
 }
