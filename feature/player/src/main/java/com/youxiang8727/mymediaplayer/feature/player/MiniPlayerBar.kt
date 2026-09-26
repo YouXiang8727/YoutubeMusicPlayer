@@ -170,7 +170,13 @@ fun MiniPlayerBar(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        itemsIndexed(queue, key = { _, item -> item.videoId }) { index, item ->
+                        // key 必須納入 index：佇列是 append-only 語意，同一首歌可被重複加入
+                        // （例如想讓某首歌連播兩次），videoId 天生不唯一，只用它當 key 會在
+                        // LazyList 佈局階段拋 IllegalArgumentException（duplicate key）。
+                        // 取捨：以 index 為 key 代表移除任一項後其後項目會整段重新 key／recompose，
+                        // 但 QueueRow 是無狀態 composable（item / isCurrent / onClick / onRemove
+                        // 全部由外部傳入），不會發生狀態錯置，故可接受。
+                        itemsIndexed(queue, key = { index, item -> "$index-${item.videoId}" }) { index, item ->
                             QueueRow(
                                 item = item,
                                 isCurrent = index == currentIndex,
@@ -470,6 +476,50 @@ private fun MiniPlayerBarExpandedPreview() {
                 PlayQueueItem("xyz98765432", "青花瓷"),
                 PlayQueueItem("def45678901", "稻香"),
                 PlayQueueItem("bbb", "一首非常非常長的歌名會被省略號截斷嗎")
+            ),
+            isExpanded = true,
+            onToggleExpand = {},
+            onTogglePlayPause = {}, onNext = {}, onPrevious = {},
+            onToggleShuffle = {}, onCycleRepeat = {}, onSeek = {},
+            onSeekToIndex = {}, onRemoveFromQueue = {}, onClearQueue = {},
+            onSaveAsPlaylist = {}
+        )
+    }
+}
+
+/**
+ * 視覺回歸防護：佇列允許同一首歌重複出現（append-only 加入同一首歌兩次）。
+ * 此狀態在修正前會讓佇列 LazyColumn 拋 duplicate key IllegalArgumentException；
+ * 保留此 Preview 作為該類 key 修正的守門畫面。
+ */
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-player",
+    name = "MiniPlayerBar - Expanded - DuplicateQueueIds"
+)
+@Composable
+private fun MiniPlayerBarDuplicateQueueIdsPreview() {
+    MyMediaPlayerTheme {
+        MiniPlayerBar(
+            snapshot = PlaybackSnapshot(
+                hasCurrent = true,
+                videoId = "dQw4w9WgXcQ",
+                title = "晴天",
+                isPlaying = true,
+                positionMs = 42_000,
+                durationMs = 269_000,
+                shuffleEnabled = false,
+                repeatMode = RepeatMode.ALL
+            ),
+            queue = listOf(
+                PlayQueueItem("dQw4w9WgXcQ", "晴天"),
+                PlayQueueItem("abc12345678", "夜曲 Live"),
+                PlayQueueItem("dQw4w9WgXcQ", "晴天"),
+                PlayQueueItem("abc12345678", "夜曲 Live")
             ),
             isExpanded = true,
             onToggleExpand = {},
