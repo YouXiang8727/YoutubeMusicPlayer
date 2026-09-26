@@ -33,8 +33,10 @@ import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
  * 播放清單選擇 BottomSheet（search / player 共用）。
  * 點擊清單項目 → [onPlaylistSelected]；點擊「建立新清單」→ [onCreateNew]。
  *
- * [onAddToQueue] 為選擇性參數：非 null 時在標題下方多出一列「加入當前播放佇列」
- * （null 時維持原本只有播放清單的外觀，既有呼叫端不受影響）。
+ * [onAddToQueue] 為選擇性參數：非 null 時 sheet 改為**雙區塊**結構——
+ * 區塊 1「加入當前播放佇列」放加入佇列的動作列，區塊 2「選擇播放清單」放歌單列表，
+ * 兩者以 section header + 分隔線區隔（避免動作列被誤讀成一個名為「加入當前播放佇列」的歌單）。
+ * 為 null 時維持原本只有播放清單的外觀（單一總標題 + 列表），既有呼叫端不受影響。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,14 +57,9 @@ fun PlaylistPickerSheet(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
         ) {
-            Text(
-                text = "選擇播放清單",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(bottom = 12.dp)
-            )
-
-            // 加入當前播放佇列（選單化的第二個意圖，圖示沿用原「加入佇列」按鈕）
             if (onAddToQueue != null) {
+                // ── 區塊 1：加入當前播放佇列（動作）──────────────────────
+                SheetSectionHeader(text = "加入當前播放佇列")
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -78,14 +75,35 @@ fun PlaylistPickerSheet(
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary
                     )
-                    Text(
-                        text = "加入當前播放佇列",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(start = 12.dp)
-                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 12.dp)
+                    ) {
+                        Text(
+                            text = "加入佇列尾端",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "不中斷目前播放",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
+                Spacer(Modifier.height(8.dp))
                 HorizontalDivider()
+                Spacer(Modifier.height(8.dp))
+
+                // ── 區塊 2：選擇播放清單（目標清單）──────────────────────
+                SheetSectionHeader(text = "選擇播放清單")
+            } else {
+                Text(
+                    text = "選擇播放清單",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
             }
 
             if (playlists.isEmpty()) {
@@ -147,6 +165,20 @@ fun PlaylistPickerSheet(
             Spacer(Modifier.height(24.dp))
         }
     }
+}
+
+/**
+ * Sheet 內的區塊標題（section header）樣式：次要層級，用來區隔同層不同性質的區塊。
+ * 刻意不用 titleMedium 總標題，避免與「動作列」或「歌單項目」同層級造成誤讀。
+ */
+@Composable
+private fun SheetSectionHeader(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(bottom = 4.dp)
+    )
 }
 
 @Preview(
@@ -234,13 +266,45 @@ private fun PlaylistPickerSheetEmptyPreview() {
 @Composable
 private fun PlaylistPickerSheetWithQueueOptionPreview() {
     MyMediaPlayerTheme {
-        // onAddToQueue 非 null：標題下方多出「加入當前播放佇列」一列 + 分隔線
+        // onAddToQueue 非 null：雙區塊結構（區塊 1 加入佇列動作 / 區塊 2 歌單列表）
         PlaylistPickerSheet(
             playlists = listOf(
                 Playlist(id = 1, name = "我的最愛"),
                 Playlist(id = 2, name = "工作播放清單"),
                 Playlist(id = 3, name = "運動音樂")
             ),
+            onPlaylistSelected = {},
+            onCreateNew = {},
+            onDismiss = {},
+            onAddToQueue = {}
+        )
+    }
+}
+
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistPickerSheet - With Queue Option & Empty - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistPickerSheet - With Queue Option & Empty - Light"
+)
+@Composable
+private fun PlaylistPickerSheetWithQueueOptionEmptyPreview() {
+    MyMediaPlayerTheme {
+        // 雙區塊 + 零歌單：兩個區塊標題仍須正確，「尚無播放清單」落在區塊 2 標題之下
+        PlaylistPickerSheet(
+            playlists = emptyList(),
             onPlaylistSelected = {},
             onCreateNew = {},
             onDismiss = {},
