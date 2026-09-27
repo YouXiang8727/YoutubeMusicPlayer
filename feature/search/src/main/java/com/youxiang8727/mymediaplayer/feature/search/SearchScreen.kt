@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,15 +23,13 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -276,7 +275,6 @@ fun SearchScreen(
  * 選項文案是 UI 語意（domain 的 [SearchSort] 只描述「要什麼」），故對應表留在本層。
  * 排序僅影響初次搜尋；續頁由 continuation token 承載，UI 不需額外處理。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SearchSortSelector(
     selected: SearchSort,
@@ -284,16 +282,20 @@ internal fun SearchSortSelector(
     onSelect: (SearchSort) -> Unit
 ) {
     val options = SearchSort.entries
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-        options.forEachIndexed { index, sort ->
-            SegmentedButton(
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        options.forEach { sort ->
+            FilterChip(
                 selected = sort == selected,
                 onClick = { onSelect(sort) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
-                enabled = enabled
-            ) {
-                Text(text = sort.label)
-            }
+                label = { Text(text = sort.label) },
+                enabled = enabled,
+                // FilterChip 預設高度 32dp，低於 Material 最小觸控目標，故拉高至 40dp。
+                // 用 requiredHeightIn 而非 height：避免被元件內部固定高度順序覆蓋。
+                modifier = Modifier.requiredHeightIn(min = 40.dp)
+            )
         }
     }
 }
