@@ -99,8 +99,19 @@ fun MiniPlayerBar(
         toastRef = Toast.makeText(context, message, Toast.LENGTH_SHORT).also { it.show() }
     }
 
-    // 目前播放的索引（用 videoId 比對）
-    val currentIndex = queue.indexOfFirst { it.videoId == snapshot.videoId }.takeIf { it >= 0 }
+    // 目前播放的佇列索引：以 snapshot.currentMediaItemIndex 為主、videoId 為二次確認。
+    //
+    // 不可用 queue.indexOfFirst { it.videoId == snapshot.videoId } 反推：播放佇列是
+    // append-only 且允許重複（同一首歌可合法排入多筆讓它連播兩次），videoId 天生不唯一，
+    // 目前播第二筆時 indexOfFirst 會回傳第一筆 → 高亮錯列。
+    //
+    // 為何要二次確認：currentMediaItemIndex（snapshot 事件流）與 queue（佇列觀察流）
+    // 雖同源於同一條 timeline，但由不同事件觸發，可能相差一幀，index 短暫指向錯列。
+    // 故要求兩者同時成立才高亮；不一致時寧可「不高亮」——短暫缺少高亮只是外觀小瑕疵，
+    // 高亮錯列則是誤導（使用戶以為在播另一首）。語意見 PlaybackSnapshot KDoc。
+    val currentIndex = snapshot.currentMediaItemIndex
+        .takeIf { it in queue.indices }
+        ?.takeIf { queue[it].videoId == snapshot.videoId }
 
     Surface(
         modifier = modifier
@@ -421,6 +432,7 @@ private fun MiniPlayerBarPlayingPreview() {
                 isPlaying = true,
                 positionMs = 83_000,
                 durationMs = 269_000,
+                currentMediaItemIndex = 0,
                 shuffleEnabled = false,
                 repeatMode = RepeatMode.ALL
             ),
@@ -467,6 +479,7 @@ private fun MiniPlayerBarExpandedPreview() {
                 isPlaying = false,
                 positionMs = 12_000,
                 durationMs = 3_721_000,
+                currentMediaItemIndex = 4,
                 shuffleEnabled = true,
                 repeatMode = RepeatMode.ONE
             ),
@@ -491,6 +504,10 @@ private fun MiniPlayerBarExpandedPreview() {
  * 視覺回歸防護：佇列允許同一首歌重複出現（append-only 加入同一首歌兩次）。
  * 此狀態在修正前會讓佇列 LazyColumn 拋 duplicate key IllegalArgumentException；
  * 保留此 Preview 作為該類 key 修正的守門畫面。
+ *
+ * currentMediaItemIndex = 0 表示目前播的是**第一筆**重複項，故高亮應落在第一筆。
+ * 與 [MiniPlayerBarDuplicateQueueCurrentIndexPreview]（index = 2，高亮第二筆）成對使用：
+ * 兩者 videoId 完全相同、只有 index 不同，若高亮位置相同即代表 UI 又退回用 videoId 判斷。
  */
 @Preview(
     showBackground = true,
@@ -512,6 +529,7 @@ private fun MiniPlayerBarDuplicateQueueIdsPreview() {
                 isPlaying = true,
                 positionMs = 42_000,
                 durationMs = 269_000,
+                currentMediaItemIndex = 0,
                 shuffleEnabled = false,
                 repeatMode = RepeatMode.ALL
             ),
@@ -520,6 +538,54 @@ private fun MiniPlayerBarDuplicateQueueIdsPreview() {
                 PlayQueueItem("abc12345678", "夜曲 Live"),
                 PlayQueueItem("dQw4w9WgXcQ", "晴天"),
                 PlayQueueItem("abc12345678", "夜曲 Live")
+            ),
+            isExpanded = true,
+            onToggleExpand = {},
+            onTogglePlayPause = {}, onNext = {}, onPrevious = {},
+            onToggleShuffle = {}, onCycleRepeat = {}, onSeek = {},
+            onSeekToIndex = {}, onRemoveFromQueue = {}, onClearQueue = {},
+            onSaveAsPlaylist = {}
+        )
+    }
+}
+
+/**
+ * 視覺回歸防護（高亮錯列 bug）：佇列 = [晴天, 夜曲, 晴天]，目前播的是**第二筆晴天**
+ * （currentMediaItemIndex = 2，videoId 同為第一筆的「晴天」）。
+ *
+ * 修正前 MiniPlayerBar 以 `queue.indexOfFirst { it.videoId == snapshot.videoId }` 反推索引，
+ * 會回傳 0 → 高亮第一筆（看起來像在播第一首，實際在播第三筆）。
+ * 正確畫面：只有第三筆（index = 2）高亮，第一筆的晴天**不應**有高亮背景與播放圖示。
+ */
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-player",
+    name = "MiniPlayerBar - Expanded - DuplicateQueueCurrentIndex"
+)
+@Composable
+private fun MiniPlayerBarDuplicateQueueCurrentIndexPreview() {
+    MyMediaPlayerTheme {
+        MiniPlayerBar(
+            snapshot = PlaybackSnapshot(
+                hasCurrent = true,
+                videoId = "dQw4w9WgXcQ",
+                title = "晴天",
+                isPlaying = true,
+                positionMs = 42_000,
+                durationMs = 269_000,
+                // 關鍵：指向第二筆重複項（index 2），而非第一筆（index 0）
+                currentMediaItemIndex = 2,
+                shuffleEnabled = false,
+                repeatMode = RepeatMode.ALL
+            ),
+            queue = listOf(
+                PlayQueueItem("dQw4w9WgXcQ", "晴天"),
+                PlayQueueItem("abc12345678", "夜曲 Live"),
+                PlayQueueItem("dQw4w9WgXcQ", "晴天")
             ),
             isExpanded = true,
             onToggleExpand = {},
