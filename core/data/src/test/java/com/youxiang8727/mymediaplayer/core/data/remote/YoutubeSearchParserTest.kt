@@ -342,11 +342,15 @@ class YoutubeSearchParserTest {
     }
 
     @Test
-    fun `續頁 chunk 無 videoWithContextRenderer 時結果為空但仍可取 token`() {
+    fun `續頁 chunk 僅含 videoRenderer 時經 fallback 仍解析出結果`() {
         val page = parseContinuationChunk(json, lastPageJson)
 
-        // 首頁結構的 videoRenderer 不應被續頁解析器誤取
-        assertTrue(page.results.isEmpty())
+        // 刻意取捨（見 parseContinuationChunk KDoc）：收集不到 videoWithContextRenderer 時
+        // 會 fallback 取 videoRenderer。此處 lastPageJson 為首頁結構（僅 videoRenderer），
+        // 故解析出 id9 —— 目的是「YouTube 改版換掉 renderer key 時不靜默回傳空結果」。
+        assertEquals(listOf("id9"), page.results.map { it.videoId })
+        assertEquals("最後一頁", page.results[0].title)
+        // lastPageJson 完全不含 continuationItemRenderer，故確實無 token
         assertNull(page.nextPageToken)
     }
 

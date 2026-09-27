@@ -232,9 +232,28 @@ internal fun parseYtInitialData(json: Json, rawJson: String): VideoSearchPage {
  * - **指定排序的初次搜尋**（2026-09 實測）：結果同為 `videoWithContextRenderer`，
  *   而非 GET 路徑的 `videoRenderer`；續頁 token 路徑與 GET 相同。
  *
- * **改版防禦**：主路徑只認 `videoWithContextRenderer`；收集到 0 筆時才 fallback 走
- * `videoRenderer`（[collectVideoRenderers]）並記 warning。目的是讓「YouTube 改版導致
- * renderer 換 key」從「靜默回傳空結果」變成「仍能出結果且 log 有明確線索」。
+ * **改版防禦（刻意取捨，勿當成疏忽移除）**：主路徑只認 `videoWithContextRenderer`；
+ * 收集到 0 筆時才 fallback 走 `videoRenderer`（[collectVideoRenderers]）並記 warning。
+ *
+ * ### 為何接受「續頁可能誤取首頁結構的結果」
+ *
+ * 「innerTube 回應裡出現 `videoRenderer`」這件事，在**技術上無法區分**兩種情境——
+ * 兩者的 JSON 形狀完全相同：
+ * 1. YouTube 改版，innerTube 排序首頁改吐 `videoRenderer`（我們**想**救回結果）。
+ * 2. continuation 失效（如退回 `GET results?continuation=`），POST 回傳整頁首頁結構
+ *    （我們**不想**取，會造成重複）。
+ *
+ * 既然無法判斷，只能在兩種失效模式間取捨，而兩者的**嚴重性與既有防護不對稱**：
+ * - 情境 2（結果重複）：**已有**防護——`SearchViewModel` 串接續頁時的跨頁去重
+ *   會排除已載入的 `videoId`，故重複結果進不了 UI。
+ * - 情境 1（改版）：若無 fallback 便是**靜默空結果**——沒有例外、log 正常，
+ *   使用者只看到「搜尋結果是空的」，且因排序是新增能力，使用者不會歸因、也不會回報。
+ *
+ * 拿「已有防護的風險」換「無防護的風險」是淨收益，故保留 fallback。
+ *
+ * ⚠️ **若要移除 fallback**，必須先以實機／logcat 確認 YouTube 已不再回傳
+ * `videoRenderer`；否則會重新暴露「靜默空結果」這個比結果重複更難察覺的失效模式。
+ *
  * fallback 僅在實際救回結果時告警——「續頁無新結果／已到底」是正常狀態，不該誤報。
  */
 internal fun parseContinuationChunk(json: Json, rawJson: String): VideoSearchPage {
