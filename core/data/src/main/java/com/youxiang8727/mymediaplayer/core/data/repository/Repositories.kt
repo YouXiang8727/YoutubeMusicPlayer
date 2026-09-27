@@ -17,6 +17,7 @@ import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistImportResult
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
+import com.youxiang8727.mymediaplayer.core.domain.model.SearchSort
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import com.youxiang8727.mymediaplayer.core.domain.repository.AudioStreamRepository
@@ -50,8 +51,12 @@ class VideoRepositoryImpl @Inject constructor(
     private val dataSource: YoutubeDataSource,
     private val trendingDataSource: TrendingPlaylistDataSource
 ) : VideoRepository {
-    override suspend fun search(query: String, continuationToken: String?): Result<VideoSearchPage> =
-        runCatching { dataSource.search(query, continuationToken) }
+    override suspend fun search(
+        query: String,
+        continuationToken: String?,
+        sort: SearchSort
+    ): Result<VideoSearchPage> =
+        runCatching { dataSource.search(query, continuationToken, sort = sort) }
 
     override suspend fun fetchTrendingSongs(region: ChartRegion): Result<List<VideoResult>> =
         runCatching { trendingDataSource.fetch(region).getOrThrow() }

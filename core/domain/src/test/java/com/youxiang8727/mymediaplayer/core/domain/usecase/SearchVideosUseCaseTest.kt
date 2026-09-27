@@ -1,6 +1,7 @@
 package com.youxiang8727.mymediaplayer.core.domain.usecase
 
 import com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion
+import com.youxiang8727.mymediaplayer.core.domain.model.SearchSort
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import com.youxiang8727.mymediaplayer.core.domain.repository.VideoRepository
@@ -17,10 +18,16 @@ class SearchVideosUseCaseTest {
     ) : VideoRepository {
         var receivedQuery: String? = null
         var receivedToken: String? = null
+        var receivedSort: SearchSort? = null
 
-        override suspend fun search(query: String, continuationToken: String?): Result<VideoSearchPage> {
+        override suspend fun search(
+            query: String,
+            continuationToken: String?,
+            sort: SearchSort
+        ): Result<VideoSearchPage> {
             receivedQuery = query
             receivedToken = continuationToken
+            receivedSort = sort
             return Result.success(page)
         }
 
@@ -81,5 +88,48 @@ class SearchVideosUseCaseTest {
 
         assertTrue(result.isSuccess)
         assertNull(result.getOrThrow().nextPageToken)
+    }
+
+    @Test
+    fun `未指定 sort 時預設為 RELEVANCE`() = runTest {
+        val repo = FakeVideoRepository()
+        val useCase = SearchVideosUseCase(repo)
+
+        useCase("晴天")
+
+        assertEquals(SearchSort.RELEVANCE, repo.receivedSort)
+    }
+
+    @Test
+    fun `LATEST 排序會原樣傳遞給 repository`() = runTest {
+        val repo = FakeVideoRepository()
+        val useCase = SearchVideosUseCase(repo)
+
+        useCase("晴天", null, SearchSort.LATEST)
+
+        assertEquals(SearchSort.LATEST, repo.receivedSort)
+        assertNull(repo.receivedToken)
+    }
+
+    @Test
+    fun `POPULAR 排序會原樣傳遞給 repository`() = runTest {
+        val repo = FakeVideoRepository()
+        val useCase = SearchVideosUseCase(repo)
+
+        useCase("晴天", null, SearchSort.POPULAR)
+
+        assertEquals(SearchSort.POPULAR, repo.receivedSort)
+        assertNull(repo.receivedToken)
+    }
+
+    @Test
+    fun `續頁時 sort 與 continuationToken 一併傳遞（由資料層決定忽略 sort）`() = runTest {
+        val repo = FakeVideoRepository()
+        val useCase = SearchVideosUseCase(repo)
+
+        useCase("晴天", "TOKEN_PAGE_2", SearchSort.LATEST)
+
+        assertEquals("TOKEN_PAGE_2", repo.receivedToken)
+        assertEquals(SearchSort.LATEST, repo.receivedSort)
     }
 }

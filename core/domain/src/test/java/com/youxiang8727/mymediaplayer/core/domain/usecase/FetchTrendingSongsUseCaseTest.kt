@@ -1,6 +1,7 @@
 package com.youxiang8727.mymediaplayer.core.domain.usecase
 
 import com.youxiang8727.mymediaplayer.core.domain.model.ChartRegion
+import com.youxiang8727.mymediaplayer.core.domain.model.SearchSort
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import com.youxiang8727.mymediaplayer.core.domain.repository.VideoRepository
@@ -16,7 +17,11 @@ class FetchTrendingSongsUseCaseTest {
     ) : VideoRepository {
         var receivedRegion: ChartRegion? = null
 
-        override suspend fun search(query: String, continuationToken: String?): Result<VideoSearchPage> =
+        override suspend fun search(
+            query: String,
+            continuationToken: String?,
+            sort: SearchSort
+        ): Result<VideoSearchPage> =
             Result.success(VideoSearchPage(results = emptyList()))
 
         override suspend fun fetchTrendingSongs(region: ChartRegion): Result<List<VideoResult>> {

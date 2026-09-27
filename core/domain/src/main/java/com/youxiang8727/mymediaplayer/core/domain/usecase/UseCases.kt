@@ -6,6 +6,7 @@ import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistImportResult
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
+import com.youxiang8727.mymediaplayer.core.domain.model.SearchSort
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
@@ -20,11 +21,15 @@ class SearchVideosUseCase @Inject constructor(
      * 初次搜尋或載入下一頁。
      * @param continuationToken null = 初次搜尋；非 null = 以該 token 載入續頁。
      *                           token 為機密性字串，不做 trim、原樣傳遞。
+     * @param sort 初次搜尋的排序方式（預設 [SearchSort.RELEVANCE]）。續頁
+     *             （[continuationToken] 非 null）時沿用 token 內既存排序，
+     *             [sort] 不生效。
      */
     suspend operator fun invoke(
         query: String,
-        continuationToken: String? = null
-    ): Result<VideoSearchPage> = repository.search(query.trim(), continuationToken)
+        continuationToken: String? = null,
+        sort: SearchSort = SearchSort.RELEVANCE
+    ): Result<VideoSearchPage> = repository.search(query.trim(), continuationToken, sort)
 }
 
 class FetchTrendingSongsUseCase @Inject constructor(
