@@ -135,6 +135,30 @@ class PlaylistRepositoryImpl : PlaylistRepository {
     override suspend fun clearPlaylist(playlistId: Long) =
         dao.clearPlaylist(playlistId)
 
+    /**
+     * 建立歌單並批次寫入項目，**整段為單一交易**：項目寫入失敗時整體 rollback，
+     * 不留「歌單已建立但項目不完整」的半成品（對照：呼叫端自行 createPlaylist +
+     * 迴圈 addItem 會有 N 次非交易寫入的此一風險）。
+     *
+     * 交易內僅觸碰 [dao]，不做任何額外外部呼叫。
+     * [items] 的 playlistId 一律被實際新歌單 id 覆寫（呼叫端不需預先知道 id）。
+     */
+    override suspend fun createPlaylistWithItems(name: String, items: List<PlaylistItem>): Long {
+        var newId = SKIP_SENTINEL
+        runInTransaction {
+            val id = dao.insertPlaylist(PlaylistEntity(name = name))
+            if (id != SKIP_SENTINEL) {
+                dao.insertItems(items.map { it.copy(playlistId = id).toEntity() })
+                newId = id
+            }
+        }
+        // 交易已結束才拋：重名時 insert（IGNORE）回 -1 本身未寫入任何資料列，
+        // 交易等同 no-op，於交易外拋例外以免與 rollback 語意混淆。
+        // 與 createPlaylist 同一道防線：重名一律轉語意化例外交由 UI 辨識。
+        if (newId == SKIP_SENTINEL) throw PlaylistNameConflictException(name)
+        return newId
+    }
+
     // ── 播放失敗標記 ──
 
     override suspend fun markStreamFailed(videoId: String, failedAt: Long) =

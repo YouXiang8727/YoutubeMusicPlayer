@@ -44,6 +44,16 @@ interface PlaylistDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertItem(entity: PlaylistItemEntity)
 
+    /**
+     * 批次寫入多列（單一 SQL INSERT … VALUES (…),(…)）。
+     *
+     * 供「一次交易內建立歌單 + 寫入全部項目」使用（見
+     * `PlaylistRepositoryImpl.createPlaylistWithItems`）：以單一 SQL 取代 N 次
+     * `insertItem`，縮短交易持有時間且不需在 Repository 層迴圈。
+     */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertItems(entities: List<PlaylistItemEntity>)
+
     @Query("DELETE FROM playlist_items WHERE playlistId = :playlistId AND videoId = :videoId")
     suspend fun deleteItem(playlistId: Long, videoId: String)
 

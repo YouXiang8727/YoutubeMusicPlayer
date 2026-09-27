@@ -90,6 +90,11 @@ class PlaylistRepositoryImplTest {
             } + entity
         }
 
+        /** 批次寫入：等同單一 INSERT 多列，語意為逐列 REPLACE（複合鍵衝突時後者覆蓋前者）。 */
+        override suspend fun insertItems(entities: List<PlaylistItemEntity>) {
+            entities.forEach { insertItem(it) }
+        }
+
         override suspend fun deleteItem(playlistId: Long, videoId: String) {
             itemTable.value = itemTable.value.filterNot {
                 it.playlistId == playlistId && it.videoId == videoId
@@ -351,6 +356,75 @@ class PlaylistRepositoryImplTest {
         val bItems = repository.observePlaylistItems(id2).first()
         assertEquals(1, aItems.size); assertEquals("vDup", aItems[0].videoId)
         assertEquals(1, bItems.size); assertEquals("vDup", bItems[0].videoId)
+    }
+
+    // ── createPlaylistWithItems（建立歌單＋批次寫入，單一交易）──
+
+    @Test
+    fun `createPlaylistWithItems 建立歌單並以實際 id 覆寫項目 playlistId`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val id = repository.createPlaylistWithItems(
+            "佇列存檔",
+            listOf(item("v1", playlistId = 0L, addedAt = 100L), item("v2", playlistId = 0L, addedAt = 99L))
+        )
+
+        assertTrue(id > 0)
+        assertEquals("佇列存檔", repository.observeAllPlaylists().first().single().name)
+        // 呼叫端不需預先知道 id：每列的 playlistId 一律被實際新歌單 id 覆寫，無孤兒（-1）列
+        val stored = dao.itemTable.value
+        assertEquals(2, stored.size)
+        assertTrue(stored.all { it.playlistId == id })
+        assertTrue(stored.none { it.playlistId == -1L })
+    }
+
+    @Test
+    fun `createPlaylistWithItems 依 addedAt DESC 讀出的順序等於寫入順序`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        // 呼叫端以 addedAt = base - index 表達佇列順序（見 SaveQueueAsPlaylistUseCase）
+        val id = repository.createPlaylistWithItems(
+            "佇列存檔",
+            listOf(
+                item("v1", playlistId = 0L, addedAt = 300L),
+                item("v2", playlistId = 0L, addedAt = 299L),
+                item("v3", playlistId = 0L, addedAt = 298L)
+            )
+        )
+
+        assertEquals(listOf("v1", "v2", "v3"), repository.observePlaylistItems(id).first().map { it.videoId })
+    }
+
+    @Test
+    fun `createPlaylistWithItems 重名時拋 PlaylistNameConflictException 且不寫入任何項目`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val existingId = repository.createPlaylist("我的最愛")
+
+        val conflict = runCatching {
+            repository.createPlaylistWithItems("我的最愛", listOf(item("v1", addedAt = 100L)))
+        }.exceptionOrNull() as? PlaylistNameConflictException
+
+        assertNotNull(conflict)
+        assertEquals("我的最愛", conflict!!.name)
+        // 未新增歌單、既有歌單未被塞入項目
+        assertEquals(1, repository.observeAllPlaylists().first().size)
+        assertTrue(repository.observePlaylistItems(existingId).first().isEmpty())
+        assertTrue(dao.itemTable.value.isEmpty())
+    }
+
+    @Test
+    fun `createPlaylistWithItems 項目為空時建立空歌單`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val id = repository.createPlaylistWithItems("空歌單", emptyList())
+
+        assertTrue(id > 0)
+        assertTrue(repository.observePlaylistItems(id).first().isEmpty())
     }
 
     @Test
