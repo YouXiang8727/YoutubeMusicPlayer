@@ -11,6 +11,7 @@ import com.youxiang8727.mymediaplayer.core.domain.repository.PlaylistRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.SearchHistoryRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.SearchSuggestionRepository
 import com.youxiang8727.mymediaplayer.core.domain.repository.VideoRepository
+import com.youxiang8727.mymediaplayer.core.domain.model.SearchSort
 import com.youxiang8727.mymediaplayer.core.domain.usecase.AddSearchHistoryUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.AddToPlaylistUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.ClearSearchHistoryUseCase
@@ -57,7 +58,7 @@ class SearchViewModelTest {
     }
 
     /**
-     * 依 token 區分初次搜尋與載入更多回傳；記錄呼叫次數與收到的 token。
+     * 依 token 區分初次搜尋與載入更多回傳；記錄呼叫次數與收到的 token／sort。
      */
     private class FakeVideoRepository(
         var firstPageResult: Result<VideoSearchPage> = Result.success(VideoSearchPage(emptyList())),
@@ -65,10 +66,17 @@ class SearchViewModelTest {
     ) : VideoRepository {
         var searchCalls = 0
         val receivedTokens = mutableListOf<String?>()
+        /** 每次呼叫收到的 sort（供排序功能斷言；續頁應永遠是預設 RELEVANCE）。 */
+        val receivedSorts = mutableListOf<SearchSort>()
 
-        override suspend fun search(query: String, continuationToken: String?): Result<VideoSearchPage> {
+        override suspend fun search(
+            query: String,
+            continuationToken: String?,
+            sort: SearchSort
+        ): Result<VideoSearchPage> {
             searchCalls++
             receivedTokens += continuationToken
+            receivedSorts += sort
             return if (continuationToken == null) firstPageResult else loadMoreResult
         }
 
@@ -204,6 +212,11 @@ class SearchViewModelTest {
 
     private fun Harness.triggerLoadMore() {
         vm.onIntent(SearchIntent.LoadMore)
+        dispatcher.scheduler.advanceUntilIdle()
+    }
+
+    private fun Harness.changeSort(sort: SearchSort) {
+        vm.onIntent(SearchIntent.ChangeSort(sort))
         dispatcher.scheduler.advanceUntilIdle()
     }
 
@@ -626,6 +639,180 @@ class SearchViewModelTest {
         assertTrue(h.vm.state.value.suggestions.isEmpty())
         assertEquals(listOf(v1), h.vm.state.value.results)
         assertTrue(h.vm.state.value.searched)
+    }
+
+    // ==================== 排序切換（sort） ====================
+
+    /**
+     * 零行為變更守門測試：排序功能導入前後，預設狀態必須完全相同
+     * （RELEVANCE ＝ 平台預設相關性排序），既有搜尋流程不受影響。
+     */
+    @Test
+    fun `sort 預設為 RELEVANCE 且既有搜尋以預設排序送出`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A"))
+        )
+        val h = buildHarness(repo)
+
+        assertEquals(SearchSort.RELEVANCE, h.vm.state.value.sort)
+
+        h.doSearch("晴天")
+
+        assertEquals(SearchSort.RELEVANCE, h.vm.state.value.sort)
+        assertEquals(listOf(SearchSort.RELEVANCE), h.repo.receivedSorts)
+    }
+
+    @Test
+    fun `切換排序立即清空既有結果與 nextPageToken`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A"))
+        )
+        val h = buildHarness(repo)
+        h.doSearch("晴天")
+        assertEquals(listOf(v1), h.vm.state.value.results)
+        assertEquals("TOKEN_A", h.vm.state.value.nextPageToken)
+
+        // 刻意不 advance：觀察「發出 intent 後、重搜 coroutine 尚未執行」的瞬間狀態
+        h.vm.onIntent(SearchIntent.ChangeSort(SearchSort.LATEST))
+        val cleared = h.vm.state.value
+
+        assertEquals(SearchSort.LATEST, cleared.sort)
+        assertEquals(emptyList<VideoResult>(), cleared.results)
+        assertNull(cleared.nextPageToken)
+        // 仍處於「已搜尋」狀態（不退回空狀態頁）
+        assertTrue(cleared.searched)
+    }
+
+    @Test
+    fun `切換排序以新 sort 重新搜尋並取代結果`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A"))
+        )
+        val h = buildHarness(repo)
+        h.doSearch("晴天")
+        assertEquals(1, h.repo.searchCalls)
+
+        // 換成「最新」後，data 層回傳的是另一組結果與另一枚 token
+        repo.firstPageResult = Result.success(VideoSearchPage(listOf(v2), "TOKEN_B"))
+        h.changeSort(SearchSort.LATEST)
+
+        // 自動重搜（不需再按搜尋鈕），且以新 sort、不帶 continuation token
+        assertEquals(2, h.repo.searchCalls)
+        assertEquals(SearchSort.LATEST, h.repo.receivedSorts.last())
+        assertNull(h.repo.receivedTokens.last())
+        // 舊結果（v1）已被取代為新排序的結果（v2），不是 append
+        assertEquals(listOf(v2), h.vm.state.value.results)
+        assertEquals("TOKEN_B", h.vm.state.value.nextPageToken)
+        assertTrue(!h.vm.state.value.isLoading)
+    }
+
+    @Test
+    fun `切換到熱門排序同樣觸發重搜且帶 POPULAR`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A"))
+        )
+        val h = buildHarness(repo)
+        h.doSearch("晴天")
+        h.changeSort(SearchSort.POPULAR)
+
+        assertEquals(SearchSort.POPULAR, h.vm.state.value.sort)
+        assertEquals(SearchSort.POPULAR, h.repo.receivedSorts.last())
+    }
+
+    @Test
+    fun `未搜尋過時切換排序不觸發搜尋但保留選項`() {
+        val repo = FakeVideoRepository()
+        val h = buildHarness(repo)
+
+        h.changeSort(SearchSort.LATEST)
+
+        assertEquals(0, h.repo.searchCalls)
+        assertTrue(!h.vm.state.value.searched)
+        assertEquals(SearchSort.LATEST, h.vm.state.value.sort)
+    }
+
+    @Test
+    fun `未搜尋過所選的排序會沿用到下一次搜尋`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A"))
+        )
+        val h = buildHarness(repo)
+
+        // 空狀態先選好排序（UI 此時不顯示切換器，屬防禦性行為）
+        h.changeSort(SearchSort.POPULAR)
+        assertEquals(0, h.repo.searchCalls)
+
+        h.doSearch("晴天")
+
+        assertEquals(1, h.repo.searchCalls)
+        assertEquals(SearchSort.POPULAR, h.repo.receivedSorts.last())
+    }
+
+    @Test
+    fun `空白 query 切換排序不觸發搜尋不崩潰`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A"))
+        )
+        val h = buildHarness(repo)
+
+        h.vm.onIntent(SearchIntent.QueryChanged("   "))
+        dispatcher.scheduler.advanceUntilIdle()
+        h.changeSort(SearchSort.LATEST)
+
+        assertEquals(0, h.repo.searchCalls)
+        assertEquals(SearchSort.LATEST, h.vm.state.value.sort)
+    }
+
+    @Test
+    fun `切換排序不寫入搜尋紀錄`() {
+        val historyRepo = FakeSearchHistoryRepository()
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A"))
+        )
+        val h = buildHarness(repo, historyRepo = historyRepo)
+        h.doSearch("晴天")
+        assertEquals(1, historyRepo.addCalls)
+
+        h.changeSort(SearchSort.LATEST)
+        h.changeSort(SearchSort.POPULAR)
+
+        // 切換排序不是新的搜尋意圖，紀錄仍只記 1 筆
+        assertEquals(1, historyRepo.addCalls)
+        assertEquals(listOf("晴天"), historyRepo.addedQueries)
+    }
+
+    @Test
+    fun `切換到當前相同排序不重搜`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A"))
+        )
+        val h = buildHarness(repo)
+        h.doSearch("晴天")
+        assertEquals(1, h.repo.searchCalls)
+
+        h.changeSort(SearchSort.RELEVANCE)
+
+        assertEquals(1, h.repo.searchCalls)
+        assertEquals(listOf(v1), h.vm.state.value.results)
+        assertEquals("TOKEN_A", h.vm.state.value.nextPageToken)
+    }
+
+    @Test
+    fun `LoadMore 不帶 sort 由 continuation token 承載排序`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(listOf(v1), "TOKEN_A")),
+            loadMoreResult = Result.success(VideoSearchPage(listOf(v2), "TOKEN_B"))
+        )
+        val h = buildHarness(repo)
+        h.doSearch("晴天")                      // 初次：RELEVANCE
+        h.changeSort(SearchSort.LATEST)        // 初次：LATEST
+        h.triggerLoadMore()                    // 續頁：沿用預設，不傳 sort
+
+        assertEquals(
+            listOf(SearchSort.RELEVANCE, SearchSort.LATEST, SearchSort.RELEVANCE),
+            h.repo.receivedSorts
+        )
+        assertEquals(listOf<String?>(null, null, "TOKEN_A"), h.repo.receivedTokens)
     }
 
     // ==================== createPlaylistAndAdd（重名防呆） ====================

@@ -2,6 +2,7 @@ package com.youxiang8727.mymediaplayer.core.data.remote
 
 import android.util.Log
 import com.youxiang8727.mymediaplayer.core.common.DispatcherProvider
+import com.youxiang8727.mymediaplayer.core.domain.model.SearchSort
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import javax.inject.Inject
@@ -19,14 +20,18 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * 不使用 YouTube Data API Key：
- * 透過 Retrofit(OkHttp) 請求（初次搜尋 GET / 續頁 innerTube POST），
+ * 透過 Retrofit(OkHttp) 請求（初次搜尋 GET 或 innerTube POST / 續頁 innerTube POST），
  * 再以 kotlinx.serialization 解析內嵌的 ytInitialData JSON。
  *
  * 分頁（2026-08 真實多頁實測結論，根因已修正）：
- * - **初次搜尋**：`GET results`，解析 `videoRenderer`（現有 [parseYtInitialData] 路徑），
+ * - **初次搜尋（預設相關性）**：`GET results`，解析 `videoRenderer`（現有 [parseYtInitialData] 路徑），
  *   續頁 token 取自 `continuationItemRenderer.continuationEndpoint.continuationCommand.token`。
- * - **續頁**：**innerTube POST**（[api.searchContinuation]），解析 append-only 續頁 chunk
- *   中的 `videoWithContextRenderer`（[parseContinuationChunk]）。
+ * - **初次搜尋（指定排序）**：**innerTube POST**（[api.searchInnerTube]），body 帶 `query` + `params`，
+ *   結果 renderer 為 `videoWithContextRenderer`，以 [parseContinuationChunk] 解析
+ *   （排序語意與常數值見 [toSearchParams]；GET 路由帶 `params` 實測不生效，故不能走 GET）。
+ * - **續頁**：**innerTube POST**（[api.searchInnerTube]），解析 append-only 續頁 chunk
+ *   中的 `videoWithContextRenderer`（[parseContinuationChunk]），**不帶 `params`**
+ *   （排序狀態由 continuation token 承載，見 [buildContinuationBody]）。
  *   修正前舊行為是 `GET results?continuation=`，實測回傳的是**整頁重新排序**
  *   （與首頁重疊 55~100%），導致「載入更多變成輪迴 / 結果重複」；POST 續頁實測重疊 0%。
  *
@@ -51,30 +56,40 @@ class YoutubeDataSource @Inject constructor(
      * @param previousVideoIds 已載入之全部 videoId（供 log 重疊率計算；由呼叫端傳入）。
      *                         僅為本資料層可觀測性用途，不影響回傳之 [VideoSearchPage]。
      * @param pageNumber 目前頁號（供 log）；null 時以「首頁 → 1、續頁 → cont」近似。
+     * @param sort 初次搜尋的排序方式。**僅在初次搜尋時生效**；續頁沿用 token 內既存排序，
+     *             刻意忽略此參數（見 [buildContinuationBody]）。
      */
     suspend fun search(
         query: String,
         continuationToken: String? = null,
         previousVideoIds: Set<String> = emptySet(),
-        pageNumber: Int? = null
+        pageNumber: Int? = null,
+        sort: SearchSort = SearchSort.RELEVANCE
     ): VideoSearchPage = withContext(dispatchers.io) {
-        if (continuationToken == null) {
-            val html = api.searchHtml(query, null)
-            val page = extractYtInitialData(html)
-                ?.let { parseYtInitialData(json, it) }
-                ?: VideoSearchPage(results = emptyList())
-            logPage(query, pageNumber, null, page.nextPageToken, page, previousVideoIds)
-            page
-        } else {
-            val body = buildContinuationBody(continuationToken)
-            val rawJson = api.searchContinuation(MWEB_CLIENT_HEADER, MWEB_CLIENT_VERSION, body)
-            val page = parseContinuationChunk(json, rawJson)
-            logPage(query, pageNumber, continuationToken, page.nextPageToken, page, previousVideoIds)
-            page
+        val params = sort.toSearchParams()
+        val page = when {
+            // 續頁：body 只帶 continuation，**不帶 params**（token 已承載搜尋狀態）。
+            continuationToken != null -> {
+                val body = buildContinuationBody(continuationToken)
+                parseContinuationChunk(json, api.searchInnerTube(MWEB_CLIENT_HEADER, MWEB_CLIENT_VERSION, body))
+            }
+            // 初次搜尋 + 排序：只有 innerTube POST 能帶 params（GET 路由實測不生效）。
+            params != null -> {
+                val body = buildSortedInitialBody(query, params)
+                parseContinuationChunk(json, api.searchInnerTube(MWEB_CLIENT_HEADER, MWEB_CLIENT_VERSION, body))
+            }
+            // 初次搜尋 + 相關性（預設）：維持既有 GET 路徑，與上版行為完全一致。
+            else -> {
+                val html = api.searchHtml(query, null)
+                extractYtInitialData(html)?.let { parseYtInitialData(json, it) }
+                    ?: VideoSearchPage(results = emptyList())
+            }
         }
+        logPage(query, pageNumber, continuationToken, page.nextPageToken, page, previousVideoIds)
+        page
     }
 
-    // region ── 續頁 request body（innerTube POST）──
+    // region ── request body（innerTube POST）──
 
     private companion object {
         const val MWEB_CLIENT_HEADER = "2"
@@ -82,12 +97,35 @@ class YoutubeDataSource @Inject constructor(
         const val JSON_MEDIA_TYPE = "application/json"
     }
 
-    /** 以固定 innerTube MWEB context 包裝 continuation token 為 JSON RequestBody。 */
+    /** innerTube MWEB context 前綴（`{"context":{"client":{...}},` 之後由呼叫端接續）。 */
+    private fun contextPrefix(): String = "{\"context\":{\"client\":{" +
+        "\"clientName\":\"MWEB\",\"clientVersion\":\"$MWEB_CLIENT_VERSION\"," +
+        "\"hl\":\"zh-TW\",\"gl\":\"TW\"}},"
+
+    /**
+     * 以固定 innerTube MWEB context 包裝 continuation token 為 JSON RequestBody。
+     *
+     * **刻意不帶 `params`**：2026-09 實測，帶 `params` 的首次搜尋所取得的 token，
+     * 其後續頁不帶 `params` 回傳結果的 `uploadDate`（2026-05／06）仍與首頁
+     * （2026-04～09）同期——排序狀態已由 token 本身承載。
+     * 請勿「貼心地」在這裡補上 `params`，那會破壞排序。
+     */
     private fun buildContinuationBody(token: String): RequestBody {
         // token 為 base64url 字串（A-Za-z0-9+/=），不含 JSON 需跳脫字元，直接內嵌安全。
-        val payload = "{\"context\":{\"client\":{" +
-            "\"clientName\":\"MWEB\",\"clientVersion\":\"$MWEB_CLIENT_VERSION\"," +
-            "\"hl\":\"zh-TW\",\"gl\":\"TW\"}},\"continuation\":\"$token\"}"
+        val payload = contextPrefix() + "\"continuation\":\"$token\"}"
+        return payload.toRequestBody(JSON_MEDIA_TYPE.toMediaType())
+    }
+
+    /**
+     * 以固定 innerTube MWEB context 包裝「查詢字串 + 排序 params」為 JSON RequestBody，
+     * 供**指定排序的初次搜尋**使用。
+     *
+     * @param params 排序參數（[toSearchParams] 產出），非 null 且為已驗證的 base64 常數。
+     */
+    private fun buildSortedInitialBody(query: String, params: String): RequestBody {
+        // query 為使用者輸入，可能含 `"` 與 `\` 需跳脫；params 為固定常數，安全。
+        val escapedQuery = query.replace("\\", "\\\\").replace("\"", "\\\"")
+        val payload = contextPrefix() + "\"query\":\"$escapedQuery\",\"params\":\"$params\"}"
         return payload.toRequestBody(JSON_MEDIA_TYPE.toMediaType())
     }
 
@@ -185,12 +223,38 @@ internal fun parseYtInitialData(json: Json, rawJson: String): VideoSearchPage {
 }
 
 /**
- * 解析**續頁（innerTube POST）** chunk：
- * 取 append-only 結構中的全部 `videoWithContextRenderer` 轉為 [VideoResult]。
- * 續頁 chunk key 路徑與首頁不同（實測）：
- * `onResponseReceivedCommands[].appendContinuationItemsAction.continuationItems[].itemSectionRenderer.contents[]`。
- * token 仍取自最後的 `continuationItemRenderer`（[extractContinuationToken] 全樹走訪可涵蓋）。
- * JSON 不合法時回傳空頁。
+ * 解析 **innerTube POST 回應**：取全部 `videoWithContextRenderer` 轉為 [VideoResult]，
+ * 並沿用 [extractContinuationToken] 抽取續頁 token。JSON 不合法時回傳空頁。
+ *
+ * 同時服務兩條路徑（兩者結果 renderer 同構，共用此解析為刻意設計，非偶然）：
+ * - **續頁**（append-only chunk）：
+ *   `onResponseReceivedCommands[].appendContinuationItemsAction.continuationItems[].itemSectionRenderer.contents[]`。
+ * - **指定排序的初次搜尋**（2026-09 實測）：結果同為 `videoWithContextRenderer`，
+ *   而非 GET 路徑的 `videoRenderer`；續頁 token 路徑與 GET 相同。
+ *
+ * **改版防禦（刻意取捨，勿當成疏忽移除）**：主路徑只認 `videoWithContextRenderer`；
+ * 收集到 0 筆時才 fallback 走 `videoRenderer`（[collectVideoRenderers]）並記 warning。
+ *
+ * ### 為何接受「續頁可能誤取首頁結構的結果」
+ *
+ * 「innerTube 回應裡出現 `videoRenderer`」這件事，在**技術上無法區分**兩種情境——
+ * 兩者的 JSON 形狀完全相同：
+ * 1. YouTube 改版，innerTube 排序首頁改吐 `videoRenderer`（我們**想**救回結果）。
+ * 2. continuation 失效（如退回 `GET results?continuation=`），POST 回傳整頁首頁結構
+ *    （我們**不想**取，會造成重複）。
+ *
+ * 既然無法判斷，只能在兩種失效模式間取捨，而兩者的**嚴重性與既有防護不對稱**：
+ * - 情境 2（結果重複）：**已有**防護——`SearchViewModel` 串接續頁時的跨頁去重
+ *   會排除已載入的 `videoId`，故重複結果進不了 UI。
+ * - 情境 1（改版）：若無 fallback 便是**靜默空結果**——沒有例外、log 正常，
+ *   使用者只看到「搜尋結果是空的」，且因排序是新增能力，使用者不會歸因、也不會回報。
+ *
+ * 拿「已有防護的風險」換「無防護的風險」是淨收益，故保留 fallback。
+ *
+ * ⚠️ **若要移除 fallback**，必須先以實機／logcat 確認 YouTube 已不再回傳
+ * `videoRenderer`；否則會重新暴露「靜默空結果」這個比結果重複更難察覺的失效模式。
+ *
+ * fallback 僅在實際救回結果時告警——「續頁無新結果／已到底」是正常狀態，不該誤報。
  */
 internal fun parseContinuationChunk(json: Json, rawJson: String): VideoSearchPage {
     val root: JsonElement = runCatching { json.parseToJsonElement(rawJson) }
@@ -199,8 +263,31 @@ internal fun parseContinuationChunk(json: Json, rawJson: String): VideoSearchPag
     val renderers = mutableListOf<JsonObject>()
     collectContinuationVideoRenderers(root, renderers)
 
-    val results = renderers.mapNotNull { it.toContinuationVideoResult() }
-        .distinctBy { it.videoId }
+    val mapped: List<VideoResult> = if (renderers.isNotEmpty()) {
+        renderers.mapNotNull { it.toContinuationVideoResult() }
+    } else {
+        // 改版防禦：正常情況 innerTube 一律回 videoWithContextRenderer，故僅在收集到 0 筆時
+        // 才啟用 fallback——正常路徑零額外走訪、零行為變更。
+        // 若 YouTube 改版讓 innerTube 首頁改吐 GET 版的 videoRenderer，這裡仍能出結果，
+        // 否則會「無例外、log 正常、使用者只看到空結果」——最難在事後察覺的失敗模式。
+        // 刻意重用既有 collectVideoRenderers（不重寫一份走訪邏輯）。
+        val legacyRenderers = mutableListOf<JsonObject>()
+        collectVideoRenderers(root, legacyRenderers)
+        if (legacyRenderers.isEmpty()) {
+            // 真的沒有任何影片 renderer：正常的「續頁無新結果／已到底」，非改版，不告警。
+            emptyList()
+        } else {
+            Log.w(
+                TAG,
+                "WARN innerTube response shape changed: videoWithContextRenderer absent, " +
+                    "fell back to videoRenderer (${legacyRenderers.size} items). " +
+                    "若搜尋結果異常請更新 collectContinuationVideoRenderers。"
+            )
+            legacyRenderers.mapNotNull { it.toVideoResult() }
+        }
+    }
+
+    val results = mapped.distinctBy { it.videoId }
     return VideoSearchPage(
         results = results,
         nextPageToken = extractContinuationToken(root)

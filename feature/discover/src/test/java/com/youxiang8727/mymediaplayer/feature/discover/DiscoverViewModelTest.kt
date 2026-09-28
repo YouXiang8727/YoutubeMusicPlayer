@@ -6,6 +6,7 @@ import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistImportResult
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
+import com.youxiang8727.mymediaplayer.core.domain.model.SearchSort
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import com.youxiang8727.mymediaplayer.core.domain.model.toPlaylistItem
@@ -68,7 +69,11 @@ class DiscoverViewModelTest {
         var trendingCalls = 0
         val receivedTrendingRegions = mutableListOf<ChartRegion>()
 
-        override suspend fun search(query: String, continuationToken: String?): Result<VideoSearchPage> =
+        override suspend fun search(
+            query: String,
+            continuationToken: String?,
+            sort: SearchSort
+        ): Result<VideoSearchPage> =
             Result.success(VideoSearchPage(emptyList()))
 
         override suspend fun fetchTrendingSongs(region: ChartRegion): Result<List<VideoResult>> {

@@ -2,6 +2,7 @@ package com.youxiang8727.mymediaplayer.feature.search
 
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
+import com.youxiang8727.mymediaplayer.core.domain.model.SearchSort
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.toPlaylistItem
 import com.youxiang8727.mymediaplayer.core.domain.usecase.AddSearchHistoryUseCase
@@ -44,7 +45,11 @@ data class SearchUiState(
     // 搜尋建議（autocomplete）：輸入過程 debounce 後載入，空白/清除/搜尋後清空
     val suggestions: List<String> = emptyList(),
     // 搜尋紀錄（最新在前，最多 10 筆，空白/清除時顯示空狀態提示）
-    val history: List<String> = emptyList()
+    val history: List<String> = emptyList(),
+    // 結果排序方式。預設 [SearchSort.RELEVANCE]（= 平台預設相關性排序），
+    // 與排序功能導入前行為完全一致。**僅初次搜尋生效**：續頁（LoadMore）由
+    // continuation token 承載排序，故 loadMore 不傳此欄。
+    val sort: SearchSort = SearchSort.RELEVANCE
 )
 
 sealed interface SearchIntent {
@@ -54,6 +59,7 @@ sealed interface SearchIntent {
     data object LoadMore : SearchIntent
     data class AddToPlaylist(val video: VideoResult, val playlistId: Long) : SearchIntent
     data object ClearHistory : SearchIntent
+    data class ChangeSort(val sort: SearchSort) : SearchIntent
 }
 
 @HiltViewModel
@@ -181,15 +187,50 @@ class SearchViewModel @Inject constructor(
             SearchIntent.ClearHistory -> {
                 viewModelScope.launch { clearSearchHistory() }
             }
+            is SearchIntent.ChangeSort -> changeSort(intent.sort)
         }
+    }
+
+    /**
+     * 切換結果排序方式。
+     *
+     * 語意決策（理由見 PR 說明）：
+     * - **必須清空既有結果與 [SearchUiState.nextPageToken]**：不同排序的結果不可混列，
+     *   且續頁 token 內部承載的是「首次搜尋的排序」，拿舊 token 去接新排序的頁
+     *   會拿到錯誤的排序結果（且 data 層無法再改寫）。故一換序就當作新的一次搜尋。
+     * - **自動重新搜尋**當前查詢字串：排序是同一查詢的呈現方式，切換後要求
+     *   使用者再按一次搜尋鈕屬多餘操作。
+     * - **不寫入搜尋紀錄**：切換排序不等於執行了新的搜尋意圖；使用者只是調整
+     *   檢視方式，記錄一次會污染「最近搜尋」語意。搜尋紀錄仍只由
+     *   [SearchIntent.Search] / [SearchIntent.SelectSuggestion] 寫入。
+     * - **未搜尋過（[SearchUiState.searched] == false）時只更新 state 不搜尋**：
+     *   空狀態頁沒有結果列表、UI 也不顯示排序切換器，無可排序對象。此時
+     *   [SearchUiState.sort] 會被保留，讓使用者下一次搜尋時沿用所選排序。
+     * - **查詢字串空白時不觸發搜尋**：由 [doSearch] 的既有 guard 擋下（不崩潰、
+     *   不發無意義請求）。
+     */
+    private fun changeSort(sort: SearchSort) {
+        if (sort == _state.value.sort) return
+        _state.update {
+            it.copy(
+                sort = sort,
+                results = emptyList(),
+                nextPageToken = null,
+                isLoadingMore = false,
+                error = null
+            )
+        }
+        if (!_state.value.searched) return
+        doSearch()
     }
 
     private fun doSearch() {
         val query = _state.value.query.trim()
         if (query.isEmpty()) return
+        val sort = _state.value.sort
         _state.update { it.copy(isLoading = true, isLoadingMore = false, error = null, searched = true) }
         viewModelScope.launch {
-            searchVideos(query)
+            searchVideos(query, sort = sort)
                 .onSuccess { page ->
                     _state.update {
                         it.copy(
@@ -224,6 +265,8 @@ class SearchViewModel @Inject constructor(
 
         _state.update { it.copy(isLoadingMore = true, error = null) }
         viewModelScope.launch {
+            // 刻意不傳 sort：續頁排序由 continuation token 承載（見 SearchVideosUseCase），
+            // 傳入只會造成「這裡的排序有意義」的錯覺。
             searchVideos(query, token)
                 .onSuccess { page ->
                     // append 去重：保留首次出現、維持既有順序。

@@ -6,6 +6,7 @@ import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistImportResult
 import com.youxiang8727.mymediaplayer.core.domain.model.PlaylistItem
+import com.youxiang8727.mymediaplayer.core.domain.model.SearchSort
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoSearchPage
 import kotlinx.coroutines.flow.Flow
@@ -14,8 +15,16 @@ interface VideoRepository {
     /**
      * 執行搜尋或載入下一頁。
      * @param continuationToken null = 初次搜尋；非 null = 以該 token 載入續頁
+     * @param sort 初次搜尋的結果排序方式（預設 [SearchSort.RELEVANCE]）。
+     *             **僅作用於初次搜尋**；傳入非 null 的 [continuationToken] 時
+     *             續頁排序沿用 token 內既存的狀態，[sort] 不再生效
+     *             （故續頁結果不會因 [sort] 改變）。
      */
-    suspend fun search(query: String, continuationToken: String? = null): Result<VideoSearchPage>
+    suspend fun search(
+        query: String,
+        continuationToken: String? = null,
+        sort: SearchSort = SearchSort.RELEVANCE
+    ): Result<VideoSearchPage>
 
     /**
      * 抓取指定區域的熱門音樂 playlist（YouTube Music Global Charts 官方頻道，

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,11 +23,13 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -47,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.youxiang8727.mymediaplayer.core.domain.model.Playlist
+import com.youxiang8727.mymediaplayer.core.domain.model.SearchSort
 import com.youxiang8727.mymediaplayer.core.domain.model.VideoResult
 import com.youxiang8727.mymediaplayer.core.ui.component.VideoThumbnailWithBadge
 import com.youxiang8727.mymediaplayer.core.ui.theme.MyMediaPlayerTheme
@@ -117,6 +121,19 @@ fun SearchScreen(
             ) { Text(if (state.isLoading) "搜尋中…" else "搜尋") }
 
             Spacer(Modifier.height(12.dp))
+
+            // 排序切換器：僅在已搜尋時顯示（空狀態頁只有「最近搜尋」，無結果可排序）。
+            // 放在搜尋鈕與結果列表之間，使用者一搜完就能在清單正上方切換。
+            if (state.searched) {
+                SearchSortSelector(
+                    selected = state.sort,
+                    // 搜尋中鎖住：避免連點造成多次重搜（doSearch 已有 isLoading guard，
+                    // 這裡只是讓禁用狀態對使用者可見）
+                    enabled = !state.isLoading,
+                    onSelect = { onIntent(SearchIntent.ChangeSort(it)) }
+                )
+                Spacer(Modifier.height(12.dp))
+            }
 
             when {
                 // 空狀態（尚未搜尋）：顯示最近搜尋紀錄；無紀錄時顯示提示文字
@@ -251,6 +268,45 @@ fun SearchScreen(
         )
     }
 }
+
+/**
+ * 搜尋結果排序切換器。唯讀呈現 [SearchUiState.sort]，點擊任一選項以 [onSelect] 回報。
+ *
+ * 選項文案是 UI 語意（domain 的 [SearchSort] 只描述「要什麼」），故對應表留在本層。
+ * 排序僅影響初次搜尋；續頁由 continuation token 承載，UI 不需額外處理。
+ */
+@Composable
+internal fun SearchSortSelector(
+    selected: SearchSort,
+    enabled: Boolean,
+    onSelect: (SearchSort) -> Unit
+) {
+    val options = SearchSort.entries
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        options.forEach { sort ->
+            FilterChip(
+                selected = sort == selected,
+                onClick = { onSelect(sort) },
+                label = { Text(text = sort.label) },
+                enabled = enabled,
+                // FilterChip 預設高度 32dp，低於 Material 最小觸控目標，故拉高至 40dp。
+                // 用 requiredHeightIn 而非 height：避免被元件內部固定高度順序覆蓋。
+                modifier = Modifier.requiredHeightIn(min = 40.dp)
+            )
+        }
+    }
+}
+
+/** [SearchSort] 的使用者可見文案。 */
+private val SearchSort.label: String
+    get() = when (this) {
+        SearchSort.RELEVANCE -> "相關性"
+        SearchSort.LATEST -> "最新"
+        SearchSort.POPULAR -> "熱門"
+    }
 
 /**
  * 搜尋建議下拉清單（autocomplete）。唯讀呈現 [suggestions]，點擊任一項以 [onSelect] 回報
@@ -635,6 +691,122 @@ private fun SearchScreenHistoryPreview() {
                 history = listOf("周杰倫 晴天", "五月天", "IU 新歌", "YOASOBI")
             ),
             playlists = emptyList(),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {},
+            onPlayVideo = {},
+            onAddToQueue = {},
+            onCreatePlaylistAndAdd = { _, _ -> }
+        )
+    }
+}
+
+// ==================== 排序切換（視覺回歸：僅 sort 不同，三張圖可直接對比） ====================
+
+/**
+ * 排序切換 Preview 共用狀態：**只有 [sort] 不同**，其餘（query／results／nextPageToken）
+ * 完全一致，讓三張 Preview 的差異只來自排序切換器的選中狀態。
+ */
+private fun sortPreviewState(sort: SearchSort) = SearchUiState(
+    query = "周杰倫",
+    results = listOf(
+        VideoResult("dQw4w9WgXcQ", "晴天", "", "Jay Chou", "4:30"),
+        VideoResult("abc12345678", "夜曲 Live", "", "Official", "3:12")
+    ),
+    nextPageToken = "continuation-token-1",
+    searched = true,
+    sort = sort
+)
+
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Sort Relevance - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Sort Relevance - Light"
+)
+@Composable
+private fun SearchScreenSortRelevancePreview() {
+    MyMediaPlayerTheme {
+        SearchScreen(
+            state = sortPreviewState(SearchSort.RELEVANCE),
+            playlists = listOf(Playlist(id = 1, name = "我的最愛")),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {},
+            onPlayVideo = {},
+            onAddToQueue = {},
+            onCreatePlaylistAndAdd = { _, _ -> }
+        )
+    }
+}
+
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Sort Latest - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Sort Latest - Light"
+)
+@Composable
+private fun SearchScreenSortLatestPreview() {
+    MyMediaPlayerTheme {
+        SearchScreen(
+            state = sortPreviewState(SearchSort.LATEST),
+            playlists = listOf(Playlist(id = 1, name = "我的最愛")),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {},
+            onPlayVideo = {},
+            onAddToQueue = {},
+            onCreatePlaylistAndAdd = { _, _ -> }
+        )
+    }
+}
+
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Sort Popular - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Sort Popular - Light"
+)
+@Composable
+private fun SearchScreenSortPopularPreview() {
+    MyMediaPlayerTheme {
+        SearchScreen(
+            state = sortPreviewState(SearchSort.POPULAR),
+            playlists = listOf(Playlist(id = 1, name = "我的最愛")),
             snackbarHostState = remember { SnackbarHostState() },
             onIntent = {},
             onPlayVideo = {},
