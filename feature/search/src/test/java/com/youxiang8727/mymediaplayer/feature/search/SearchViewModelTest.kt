@@ -250,6 +250,27 @@ class SearchViewModelTest {
         assertEquals("搜尋失敗：boom", h.messages.last())
     }
 
+    /**
+     * 空結果回饋只由 UI 空狀態承載，ViewModel 不再發「查無結果」snackbar
+     * （避免短暫浮動與持續顯示的文字同時出現）。
+     */
+    @Test
+    fun `搜尋無結果時不發出 messages 由空狀態承載回饋`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(emptyList()))
+        )
+        val h = buildHarness(repo)
+        h.doSearch("這是不存在關鍵字zzz")
+
+        // 搜尋本身成功：狀態正確進入「已搜尋但無結果」，空狀態據此顯示「查無結果」
+        assertTrue(h.vm.state.value.searched)
+        assertTrue(h.vm.state.value.results.isEmpty())
+        assertNull(h.vm.state.value.error)
+        assertTrue(!h.vm.state.value.isLoading)
+        // 不再發出重複的 snackbar
+        assertEquals(emptyList<String>(), h.messages)
+    }
+
     @Test
     fun `loadMore 成功時 append 結果並更新 token`() {
         val repo = FakeVideoRepository(
