@@ -249,7 +249,10 @@ class SearchViewModel @Inject constructor(
                             error = null
                         )
                     }
-                    if (page.results.isEmpty()) _messages.tryEmit("查無結果")
+                    // 空結果不再發 snackbar：回饋改由 SearchScreen 的空狀態
+                    // （「查無結果」置中文字，持續可見）承載，避免同一句話同時
+                    // 出現兩次（短暫浮動 + 持續顯示）。搜尋鈕於空結果時仍可點，
+                    // 使用者可自行再次搜尋。
                 }
                 .onFailure { e ->
                     val error = e.toSearchError()
