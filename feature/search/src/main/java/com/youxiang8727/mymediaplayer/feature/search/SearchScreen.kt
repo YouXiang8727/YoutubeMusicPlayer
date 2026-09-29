@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -43,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.Devices
@@ -127,8 +129,10 @@ fun SearchScreen(
             if (state.searched) {
                 SearchSortSelector(
                     selected = state.sort,
-                    // 搜尋中鎖住：避免連點造成多次重搜（doSearch 已有 isLoading guard，
-                    // 這裡只是讓禁用狀態對使用者可見）
+                    // 搜尋中鎖住：避免連點造成多次重搜。**doSearch 本身沒有 isLoading
+                    // 重入 guard**（只有 loadMore 有），所以此處的 enabled 與搜尋鈕的
+                    // enabled 就是防止連點發出多次請求的**唯一**防線——移除任一個，
+                    // 連點就會真的重搜。
                     enabled = !state.isLoading,
                     onSelect = { onIntent(SearchIntent.ChangeSort(it)) }
                 )
@@ -192,6 +196,12 @@ fun SearchScreen(
                     Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) { CircularProgressIndicator() }
+
+                // 搜尋失敗：必須排在「查無結果」**之前**。兩者 results 都是空的，
+                // 若順序顛倒，網路失敗會被誤呈為「查無結果」——那是誤導（使用者會
+                // 以為搜尋成功但沒結果）。訊息由 ViewModel 依失敗原因分類（SearchError），
+                // 本層不判斷原因、只呈現。
+                state.error != null -> SearchErrorState(message = state.error.message)
 
                 state.results.isEmpty() -> Box(
                     Modifier.fillMaxSize(),
@@ -266,6 +276,54 @@ fun SearchScreen(
                 showCreateDialog = false
             }
         )
+    }
+}
+
+/**
+ * 搜尋失敗的錯誤狀態：取代結果列表與「查無結果」空狀態。
+ *
+ * 唯讀呈現 [message]（由 ViewModel 的 [SearchError] 依失敗原因分類後給出），本函式
+ * **不判斷原因**——分類邏輯在 ViewModel 保持可測。
+ *
+ * ### 為什麼沒有「重試」按鈕（設計判斷）
+ *
+ * 搜尋鈕就在本狀態正上方且**永遠可用**（`enabled = !isLoading && query.isNotBlank()`，
+ * 失敗後 `isLoading` 已回 false）；排序 chip 也會觸發重搜且同樣可用。兩者都在同一個
+ * 視窗內、距本狀態僅數十 dp。再放一顆「重試」會是**第三個執行同一動作**的控制項，
+ * 而且必須與全寬的「搜尋」鈕區隔（否則就是同一個動作兩個名字）——這正是
+ * `docs/TEAM.md` §7 排序切換器決策中指出的「層級訊息被抹掉」問題。
+ * `docs/qa/smoke-checklist.md` [O2] 亦已記錄「搜尋鈕仍可點，使用者能自行再次搜尋，
+ * 不需另加重試按鈕」。若日後產品 wants 標準空狀態重試鈕，在此加一顆即可。
+ *
+ * ### 長訊息不破版
+ *
+ * [message] 的長度不由本層控制（文案會改、會翻譯），且系統字級可被使用者放大，
+ * 因此**不設** `maxLines`、不設 `overflow`，讓文字自然換行；左右留 24dp 避免貼邊。
+ * 視覺回歸見 `SearchErrorState` 的長訊息 Preview。
+ */
+@Composable
+internal fun SearchErrorState(message: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                Icons.Filled.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(40.dp)
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+        }
     }
 }
 
@@ -813,5 +871,91 @@ private fun SearchScreenSortPopularPreview() {
             onAddToQueue = {},
             onCreatePlaylistAndAdd = { _, _ -> }
         )
+    }
+}
+
+// ==================== 錯誤狀態（視覺回歸） ====================
+
+/**
+ * 錯誤狀態於完整搜尋頁的呈現。
+ *
+ * 刻意挑 [SearchError.NETWORK]：其文案是四類中最長（「無法連線到網路，請檢查網路後重試」），
+ * 完整頁面（搜尋框＋搜尋鈕＋排序切換器＋錯誤狀態）可一併檢查錯誤狀態不會把
+ * 上方控制項擠掉、或與「查無結果」空狀態難以區分。
+ */
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Error Network - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchScreen - Error Network - Light"
+)
+@Composable
+private fun SearchScreenErrorNetworkPreview() {
+    MyMediaPlayerTheme {
+        SearchScreen(
+            state = SearchUiState(
+                query = "周杰倫 晴天",
+                searched = true,
+                error = SearchError.NETWORK
+            ),
+            playlists = listOf(Playlist(id = 1, name = "我的最愛")),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {},
+            onPlayVideo = {},
+            onAddToQueue = {},
+            onCreatePlaylistAndAdd = { _, _ -> }
+        )
+    }
+}
+
+/**
+ * 錯誤狀態的**長訊息壓力測試**（`fontScale = 1.8f` ＋ 超長文案）。
+ *
+ * 錯誤訊息的長度不由 UI 層控制（文案會改、會翻譯），且系統字級可被使用者放大。
+ * 此 Preview 鎖住兩件事：① 文案自然換行、**不**溢出或被截斷（`SearchErrorState`
+ * 刻意不設 `maxLines`／`overflow`）② 換行後仍置中且左右留白不貼邊。
+ *
+ * 獨立於 `SearchScreen` 預覽：長文案無法由 [SearchUiState.error] 產生（那是封閉
+ * enum），故直接對 [SearchErrorState] 取參數，專門鎖這個元件的換行行為。
+ */
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.8f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchErrorState - Long Message Large Font - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.8f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-search",
+    name = "SearchErrorState - Long Message Large Font - Light"
+)
+@Composable
+private fun SearchErrorStateLongMessagePreview() {
+    MyMediaPlayerTheme {
+        Surface {
+            SearchErrorState(
+                message = "搜尋結果無法顯示，請稍後再試一次；若持續發生，可能是服務暫時" +
+                    "維護或回應格式變更，請稍候再試。"
+            )
+        }
     }
 }

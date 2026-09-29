@@ -40,7 +40,16 @@ data class SearchUiState(
     val results: List<VideoResult> = emptyList(),
     val nextPageToken: String? = null,
     val isLoadingMore: Boolean = false,
-    val error: String? = null,
+    /**
+     * 搜尋失敗的原因分類，供結果區渲染錯誤狀態（`error != null` 優先於「查無結果」）。
+     *
+     * **只記錄「初次搜尋」失敗**：[loadMore] 失敗刻意不寫入此欄位——那次既有結果
+     * 仍可閱讀，而錯誤狀態會取代整個結果列表，寫入等於用錯誤畫面蓋掉有效內容。
+     *
+     * 型別為 [SearchError] 而非 `String`：讓「原始例外訊息外顯到畫面」在型別層
+     * 不可能發生（分類依據與限制見 [SearchError]）。
+     */
+    val error: SearchError? = null,
     val searched: Boolean = false,
     // 搜尋建議（autocomplete）：輸入過程 debounce 後載入，空白/清除/搜尋後清空
     val suggestions: List<String> = emptyList(),
@@ -243,14 +252,15 @@ class SearchViewModel @Inject constructor(
                     if (page.results.isEmpty()) _messages.tryEmit("查無結果")
                 }
                 .onFailure { e ->
+                    val error = e.toSearchError()
                     _state.update {
                         it.copy(
                             isLoading = false,
                             nextPageToken = null,
-                            error = e.message
+                            error = error
                         )
                     }
-                    _messages.tryEmit("搜尋失敗：${e.message ?: "未知錯誤"}")
+                    _messages.tryEmit(error.message)
                 }
         }
     }
@@ -318,9 +328,12 @@ class SearchViewModel @Inject constructor(
                     }
                 }
                 .onFailure { e ->
-                    // 失敗不破壞既有結果，保留現有 nextPageToken 供使用者重試
-                    _state.update { it.copy(isLoadingMore = false, error = e.message) }
-                    _messages.tryEmit("載入更多失敗：${e.message ?: "未知錯誤"}")
+                    // 失敗不破壞既有結果，保留現有 nextPageToken 供使用者重試。
+                    // **刻意不寫入 state.error**：錯誤狀態在 UI 是取代整個結果列表的
+                    // 分支（見 SearchScreen 結果區），而載入更多失敗時既有結果仍有效，
+                    // 寫進去等於用錯誤畫面蓋掉可閱讀的內容。改以 snackbar 提示。
+                    _state.update { it.copy(isLoadingMore = false) }
+                    _messages.tryEmit("載入更多失敗：${e.toSearchError().message}")
                 }
         }
     }
