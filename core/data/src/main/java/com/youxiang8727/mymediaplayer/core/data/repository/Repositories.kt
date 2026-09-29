@@ -147,13 +147,17 @@ class PlaylistRepositoryImpl : PlaylistRepository {
      *
      * 交易內僅觸碰 [dao]，不做任何額外外部呼叫。
      * [items] 的 playlistId 一律被實際新歌單 id 覆寫（呼叫端不需預先知道 id）。
+     *
+     * 寫入前另做縮圖正規化（[withResolvedThumbnail]）：本方法的典型來源是
+     * 播放佇列（`PlayQueueItem` 僅有 videoId + title，無縮圖），若不補值
+     * 建立的歌單縮圖會全部是灰色色塊。
      */
     override suspend fun createPlaylistWithItems(name: String, items: List<PlaylistItem>): Long {
         var newId = SKIP_SENTINEL
         runInTransaction {
             val id = dao.insertPlaylist(PlaylistEntity(name = name))
             if (id != SKIP_SENTINEL) {
-                dao.insertItems(items.map { it.copy(playlistId = id).toEntity() })
+                dao.insertItems(items.map { it.withResolvedThumbnail().copy(playlistId = id).toEntity() })
                 newId = id
             }
         }

@@ -427,6 +427,92 @@ class PlaylistRepositoryImplTest {
         assertTrue(repository.observePlaylistItems(id).first().isEmpty())
     }
 
+    // ── createPlaylistWithItems 縮圖正規化（存佇列為歌單時補縮圖）──
+
+    @Test
+    fun `createPlaylistWithItems 縮圖為空時由 videoId 推導 YouTube 縮圖 URL`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        // 佇列來源（PlayQueueItem）只有 videoId + title，thumbnailUrl 恆為空字串
+        val id = repository.createPlaylistWithItems(
+            "佇列存檔",
+            listOf(
+                PlaylistItem(
+                    videoId = "dQw4w9WgXcQ", title = "T", thumbnailUrl = "",
+                    channel = "", duration = null, addedAt = 100L, playlistId = 0L
+                )
+            )
+        )
+
+        val stored = dao.itemTable.value.single()
+        // mqdefault（320×180、16:9）——與歌單詳情頁槽位比例一致，Crop 下不裁切（勿改回 hqdefault）
+        assertEquals("https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg", stored.thumbnailUrl)
+        // Domain 讀回亦一致（toDomain 映射保留）
+        assertEquals(stored.thumbnailUrl, repository.observePlaylistItems(id).first().single().thumbnailUrl)
+    }
+
+    @Test
+    fun `createPlaylistWithItems 縮圖為純空白時同樣視為空白並補上推導值`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        repository.createPlaylistWithItems(
+            "佇列存檔",
+            listOf(
+                PlaylistItem(
+                    videoId = "dQw4w9WgXcQ", title = "T", thumbnailUrl = "   ",
+                    channel = "", duration = null, addedAt = 100L, playlistId = 0L
+                )
+            )
+        )
+
+        assertEquals("https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg", dao.itemTable.value.single().thumbnailUrl)
+    }
+
+    @Test
+    fun `createPlaylistWithItems 已有縮圖者不被推導值覆蓋`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        // 搜尋來源（VideoResult.toPlaylistItem）已帶真實縮圖 —— 必須原樣保留
+        repository.createPlaylistWithItems(
+            "搜尋存檔",
+            listOf(
+                PlaylistItem(
+                    videoId = "dQw4w9WgXcQ", title = "T",
+                    thumbnailUrl = "https://real.example.com/thumb.jpg",
+                    channel = "C", duration = null, addedAt = 100L, playlistId = 0L
+                )
+            )
+        )
+
+        assertEquals("https://real.example.com/thumb.jpg", dao.itemTable.value.single().thumbnailUrl)
+    }
+
+    @Test
+    fun `createPlaylistWithItems videoId 非 11 字元 base64url 時保持空字串不寫入無效 URL`() = runTest {
+        val dao = FakePlaylistDao()
+        val repository = PlaylistRepositoryImpl(dao)
+
+        val id = repository.createPlaylistWithItems(
+            "佇列存檔",
+            listOf(
+                // 太短 / 太長 / 含非法字元 三種常見異常
+                PlaylistItem(videoId = "short", title = "T1", thumbnailUrl = "", channel = "",
+                    duration = null, addedAt = 100L, playlistId = 0L),
+                PlaylistItem(videoId = "dQw4w9WgXcQextra", title = "T2", thumbnailUrl = "", channel = "",
+                    duration = null, addedAt = 99L, playlistId = 0L),
+                PlaylistItem(videoId = "dQw4w9WgXc!", title = "T3", thumbnailUrl = "", channel = "",
+                    duration = null, addedAt = 98L, playlistId = 0L)
+            )
+        )
+
+        // 明確留空：UI 呈現「無縮圖」而非拼出必然 404 的 URL 走 error fallback
+        assertEquals(listOf("", "", ""), repository.observePlaylistItems(id).first().map { it.thumbnailUrl })
+        assertTrue(dao.itemTable.value.none { it.thumbnailUrl.contains("ytimg") })
+    }
+
     @Test
     fun `importPlaylistFromJson 單一衝突 Replace 交易性重建既有歌單與項目`() = runTest {
         val dao = FakePlaylistDao()
