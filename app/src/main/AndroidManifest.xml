@@ -8,6 +8,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 讀取 Download/MyMediaPlayer/ 下的歌單備份檔。
+         Android 11+（本專案 minSdk 33）MediaStore Downloads 的查詢結果只含「本 App 擁有」的檔，
+         解除安裝重裝後舊備份的 ownership 會被撤掉 → 查不到。需此權限才能列出全部備份。
+         取捨見 docs/TEAM.md §7 決策記錄。 -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
 
     <application
         android:name=".MediaPlayerApp"
