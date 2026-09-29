@@ -1,6 +1,7 @@
 package com.youxiang8727.mymediaplayer.feature.playlist
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,15 +35,20 @@ import java.util.Locale
 /**
  * 匯入歌單 BottomSheet：列出 `Download/MyMediaPlayer/` 下的 `.json` 備份檔。
  * 點擊某檔或「匯入」按鈕 → [onFileSelected]；「刪除」按鈕 → [onDelete]（sheet 維持開啟，由呼叫方負責確認彈窗）；
- * 點「重新掃描」→ [onRescan]。
+ * 點「重新掃描」→ [onRescan]；[ImportBackupPanelState.PermissionRequired] 時顯示阻擋訊息與
+ * 「前往權限設定」→ [onOpenSettings]。
+ *
+ * [panelState] 由純函式 [importBackupPanelState] 產生，四種情境（未授權／掃描中／查詢失敗／有清單）
+ * 在此分派，Sheet 本身不判斷權限也不做 IO。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImportBackupSheet(
-    backups: List<PlaylistBackupFile>,
+    panelState: ImportBackupPanelState,
     onFileSelected: (PlaylistBackupFile) -> Unit,
     onDelete: (PlaylistBackupFile) -> Unit,
     onRescan: () -> Unit,
+    onOpenSettings: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -75,31 +81,92 @@ fun ImportBackupSheet(
 
             Spacer(Modifier.height(4.dp))
 
-            if (backups.isEmpty()) {
-                // 空狀態
-                Text(
-                    text = "Download/MyMediaPlayer/ 沒有備份檔，請先執行匯出",
+            when (panelState) {
+                is ImportBackupPanelState.PermissionRequired ->
+                    PermissionRequiredContent(onOpenSettings = onOpenSettings)
+
+                is ImportBackupPanelState.Scanning -> Text(
+                    text = "正在掃描 Download/MyMediaPlayer/…",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(vertical = 12.dp)
                 )
-            } else {
-                LazyColumn(modifier = Modifier.height(400.dp)) {
-                    items(backups, key = { it.uri.toString() }) { backup ->
-                        ImportBackupItem(
-                            backup = backup,
-                            onClick = {
-                                onFileSelected(backup)
-                                onDismiss()
-                            },
-                            onDelete = { onDelete(backup) }
-                        )
-                        HorizontalDivider()
-                    }
+
+                is ImportBackupPanelState.QueryFailed -> Column(
+                    modifier = Modifier.padding(vertical = 12.dp)
+                ) {
+                    Text(
+                        text = "無法讀取 Download/MyMediaPlayer/ 的備份清單",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    // 查詢失敗 ≠ 沒有備份：不可引導使用者去重新匯出（那不是解決辦法）
+                    Text(
+                        text = panelState.reason
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let { "錯誤：$it" }
+                            ?: "可能是存取權限在讀取過程中被關閉，請開啟權限後再試一次。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
+
+                is ImportBackupPanelState.Ready ->
+                    if (panelState.backups.isEmpty()) {
+                        // 空狀態：查詢成功且確實沒有備份
+                        Text(
+                            text = "Download/MyMediaPlayer/ 沒有備份檔，請先執行匯出",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+                    } else {
+                        LazyColumn(modifier = Modifier.height(400.dp)) {
+                            items(panelState.backups, key = { it.uri.toString() }) { backup ->
+                                ImportBackupItem(
+                                    backup = backup,
+                                    onClick = {
+                                        onFileSelected(backup)
+                                        onDismiss()
+                                    },
+                                    onDelete = { onDelete(backup) }
+                                )
+                                HorizontalDivider()
+                            }
+                        }
+                    }
             }
 
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/**
+ * 未取得「所有檔案存取」權限時的阻擋內容。
+ *
+ * 這裡**不能**顯示「沒有備份檔」——舊備份可能真的在，只是 MediaStore 不把非本 App 擁有的
+ * 檔案列出來（解除安裝→重裝的典型情境）。
+ */
+@Composable
+private fun PermissionRequiredContent(onOpenSettings: () -> Unit) {
+    Column(modifier = Modifier.padding(top = 12.dp)) {
+        Text(
+            text = "需要「所有檔案存取」權限才能讀取 Download/MyMediaPlayer/ 的備份檔。",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            text = "未開啟時，系統只會列出本 App 自己建立的檔案，" +
+                "重新安裝前匯出的舊備份會看不到（檔案其實還在）。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+        Row(
+            modifier = Modifier.padding(top = 4.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            TextButton(onClick = onOpenSettings) { Text("前往權限設定") }
         }
     }
 }
@@ -186,10 +253,11 @@ private val sampleBackups = listOf(
 private fun ImportBackupSheetPreview() {
     MyMediaPlayerTheme {
         ImportBackupSheet(
-            backups = sampleBackups,
+            panelState = ImportBackupPanelState.Ready(sampleBackups),
             onFileSelected = {},
             onDelete = {},
             onRescan = {},
+            onOpenSettings = {},
             onDismiss = {}
         )
     }
@@ -217,10 +285,77 @@ private fun ImportBackupSheetPreview() {
 private fun ImportBackupSheetEmptyPreview() {
     MyMediaPlayerTheme {
         ImportBackupSheet(
-            backups = emptyList(),
+            panelState = ImportBackupPanelState.Ready(emptyList()),
             onFileSelected = {},
             onDelete = {},
             onRescan = {},
+            onOpenSettings = {},
+            onDismiss = {}
+        )
+    }
+}
+
+// 未授權是本次修正的核心情境（原本會誤顯示「沒有備份檔」），固定做視覺回歸
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "ImportBackupSheet - PermissionRequired - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "ImportBackupSheet - PermissionRequired - Light"
+)
+@Composable
+private fun ImportBackupSheetPermissionRequiredPreview() {
+    MyMediaPlayerTheme {
+        ImportBackupSheet(
+            panelState = ImportBackupPanelState.PermissionRequired,
+            onFileSelected = {},
+            onDelete = {},
+            onRescan = {},
+            onOpenSettings = {},
+            onDismiss = {}
+        )
+    }
+}
+
+// 查詢失敗：必須與「沒有備份」視覺可區分，否則等於沒修
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "ImportBackupSheet - QueryFailed - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "ImportBackupSheet - QueryFailed - Light"
+)
+@Composable
+private fun ImportBackupSheetQueryFailedPreview() {
+    MyMediaPlayerTheme {
+        ImportBackupSheet(
+            panelState = ImportBackupPanelState.QueryFailed("SecurityException: 權限已被關閉"),
+            onFileSelected = {},
+            onDelete = {},
+            onRescan = {},
+            onOpenSettings = {},
             onDismiss = {}
         )
     }

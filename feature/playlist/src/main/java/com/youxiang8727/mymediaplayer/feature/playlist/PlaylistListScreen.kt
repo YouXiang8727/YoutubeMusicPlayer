@@ -49,6 +49,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictDecision
 import com.youxiang8727.mymediaplayer.core.domain.model.ImportConflictInfo
@@ -368,19 +369,40 @@ fun PlaylistListRoute(
 
     // 匯入：App 內掃描 Download/MyMediaPlayer/ 選檔（不再開系統檔案選擇器）
     var showImportSheet by remember { mutableStateOf(false) }
-    var backupFiles by remember { mutableStateOf<List<PlaylistBackupFile>>(emptyList()) }
+    // 是否持有 MANAGE_EXTERNAL_STORAGE（開 sheet 前與 resume 時都會重查）
+    var hasAllFilesAccess by remember { mutableStateOf(context.hasAllFilesAccess()) }
+    // 最近一次備份清單查詢結果；null = 尚未查詢／查詢中
+    var backupQuery by remember { mutableStateOf<Result<List<PlaylistBackupFile>>?>(null) }
     // 待刪除的備份檔（非 null 時顯示刪除確認 AlertDialog，sheet 維持開啟）
     var pendingDelete by remember { mutableStateOf<PlaylistBackupFile?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
     fun rescanBackups() {
         coroutineScope.launch {
-            backupFiles = withContext(Dispatchers.IO) { context.queryPlaylistBackups() }
+            // 每次掃描都重新確認權限：使用者可能在「權限設定」頁把權限關掉
+            val granted = context.hasAllFilesAccess()
+            hasAllFilesAccess = granted
+            if (!granted) {
+                // 未授權時不查——查了只會得到空的查詢結果，
+                // 那正是「明明有備份卻說沒有」的誤導來源
+                backupQuery = null
+                return@launch
+            }
+            backupQuery = null // 進入掃描中，避免舊結果殘留
+            backupQuery = withContext(Dispatchers.IO) { context.queryPlaylistBackups() }
         }
     }
 
     LaunchedEffect(Unit) {
         viewModel.messages.collect { snackbarHostState.showSnackbar(it) }
+    }
+
+    // 從「所有檔案存取」權限設定頁返回時**不能**依賴 activity result（該頁只是設定頁的
+    // toggle，回傳碼不可靠），因此以 lifecycle resume 重新檢查實際權限狀態並自動重掃。
+    // 只在 sheet 開啟時才做，避免無謂的 MediaStore 查詢。
+    LifecycleResumeEffect(showImportSheet) {
+        if (showImportSheet) rescanBackups()
+        onPauseOrDispose { }
     }
 
     // 匯出成功（JSON 就緒）→ MediaStore 直寫固定資料夾 Download/MyMediaPlayer/
@@ -432,7 +454,7 @@ fun PlaylistListRoute(
     // 匯入備份清單 BottomSheet：點擊檔名後才讀取內容送 VM
     if (showImportSheet) {
         ImportBackupSheet(
-            backups = backupFiles,
+            panelState = importBackupPanelState(hasAllFilesAccess, backupQuery),
             onFileSelected = { file ->
                 coroutineScope.launch {
                     val json = withContext(Dispatchers.IO) {
@@ -447,6 +469,15 @@ fun PlaylistListRoute(
             },
             onDelete = { file -> pendingDelete = file },
             onRescan = { rescanBackups() },
+            onOpenSettings = {
+                coroutineScope.launch {
+                    val opened = context.openAllFilesAccessSettings()
+                    if (!opened) {
+                        // 連全域設定頁都開不起來 → 如實回報，不假成功
+                        snackbarHostState.showSnackbar("無法開啟權限設定頁，請至系統設定手動開啟")
+                    }
+                }
+            },
             onDismiss = { showImportSheet = false }
         )
     }
