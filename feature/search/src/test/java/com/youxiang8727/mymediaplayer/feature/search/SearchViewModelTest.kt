@@ -21,6 +21,9 @@ import com.youxiang8727.mymediaplayer.core.domain.usecase.ObserveSearchHistoryUs
 import com.youxiang8727.mymediaplayer.core.domain.usecase.PlaylistNameConflictException
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchSuggestionsUseCase
 import com.youxiang8727.mymediaplayer.core.domain.usecase.SearchVideosUseCase
+import java.io.IOException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -245,9 +248,150 @@ class SearchViewModelTest {
         h.doSearch("晴天")
 
         assertNull(h.vm.state.value.nextPageToken)
-        assertEquals("boom", h.vm.state.value.error)
+        assertEquals(SearchError.UNKNOWN, h.vm.state.value.error)
         assertEquals(emptyList<VideoResult>(), h.vm.state.value.results)
-        assertEquals("搜尋失敗：boom", h.messages.last())
+        assertEquals(SearchError.UNKNOWN.message, h.messages.last())
+    }
+
+    // ==================== 搜尋失敗的原因分類（SearchError） ====================
+
+    @Test
+    fun `搜尋失敗因網路例外分類為 NETWORK 且訊息提示檢查網路`() {
+        val repo = FakeVideoRepository(
+            // SocketTimeoutException 是 IOException 的子類，模擬連線逾時
+            firstPageResult = Result.failure(SocketTimeoutException("timeout"))
+        )
+        val h = buildHarness(repo)
+        h.doSearch("晴天")
+
+        val error = h.vm.state.value.error
+        assertEquals(SearchError.NETWORK, error)
+        assertEquals(emptyList<VideoResult>(), h.vm.state.value.results)
+        // 網路類必須給出「使用者有事可做」的行動指令
+        assertTrue(error!!.message.contains("檢查網路"))
+    }
+
+    @Test
+    fun `IOException 被包裝在 RuntimeException 內仍分類為 NETWORK`() {
+        // 走訪 cause 鏈：只看最外層會把網路錯誤誤判成 UNKNOWN（最常見的失敗被誤判）
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.failure(
+                RuntimeException("wrapped", UnknownHostException("m.youtube.com"))
+            )
+        )
+        val h = buildHarness(repo)
+        h.doSearch("晴天")
+
+        assertEquals(SearchError.NETWORK, h.vm.state.value.error)
+    }
+
+    @Test
+    fun `不同失敗原因產生不同訊息且未知原因保留搜尋失敗語意`() {
+        val networkHarness = buildHarness(
+            FakeVideoRepository(firstPageResult = Result.failure(IOException("down")))
+        )
+        networkHarness.doSearch("晴天")
+        val networkError = networkHarness.vm.state.value.error
+
+        val unknownHarness = buildHarness(
+            FakeVideoRepository(firstPageResult = Result.failure(IllegalStateException("wtf")))
+        )
+        unknownHarness.doSearch("晴天")
+        val unknownError = unknownHarness.vm.state.value.error
+
+        // 分類不同
+        assertEquals(SearchError.NETWORK, networkError)
+        assertEquals(SearchError.UNKNOWN, unknownError)
+        // 訊息也不同（否則分類對使用者就沒有意義）
+        assertTrue(networkError!!.message != unknownError!!.message)
+        // 未知類保留「搜尋失敗」的大類語意
+        assertTrue(unknownError.message.contains("搜尋失敗"))
+    }
+
+    @Test
+    fun `錯誤訊息不外顯原始例外訊息`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.failure(IOException("failed to connect to /10.0.0.1:443"))
+        )
+        val h = buildHarness(repo)
+        h.doSearch("晴天")
+
+        val error = h.vm.state.value.error
+        assertEquals(SearchError.NETWORK, error)
+        // 英文內部細節（主機、埠號、堆疊字串）不得出現在畫面或 snackbar 上
+        assertTrue(!error!!.message.contains("10.0.0.1"))
+        assertTrue(!error.message.contains("failed to connect"))
+        assertTrue(!h.messages.last().contains("failed to connect"))
+    }
+
+    @Test
+    fun `HTTP 例外全名分類為 SERVER 且不引導使用者檢查網路`() {
+        // retrofit2.HttpException 不在 feature:search 的 classpath 上（依賴方向由
+        // Gradle 物理強制），故以真實類別全名驅動分類表，見 classifyByClassName。
+        assertEquals(
+            SearchError.SERVER,
+            classifyByClassName(listOf("retrofit2.HttpException"))
+        )
+        assertEquals(
+            SearchError.SERVER,
+            classifyByClassName(listOf("java.lang.RuntimeException", "retrofit2.HttpException"))
+        )
+        // 伺服器端問題不可讓使用者以為是自己網路的事
+        assertTrue(!SearchError.SERVER.message.contains("網路"))
+    }
+
+    @Test
+    fun `解析例外全名分類為 PARSE 且不引導使用者檢查網路`() {
+        assertEquals(
+            SearchError.PARSE,
+            classifyByClassName(listOf("kotlinx.serialization.SerializationException"))
+        )
+        assertTrue(!SearchError.PARSE.message.contains("網路"))
+    }
+
+    @Test
+    fun `無法歸類的例外全名分類為 UNKNOWN`() {
+        assertEquals(
+            SearchError.UNKNOWN,
+            classifyByClassName(listOf("java.lang.IllegalStateException"))
+        )
+        assertEquals(SearchError.UNKNOWN, classifyByClassName(emptyList()))
+    }
+
+    @Test
+    fun `真正空結果時 error 為 null 以區別於搜尋失敗`() {
+        // 上游正常回應但 0 筆：不是失敗，不該顯示錯誤狀態（否則使用者會誤以為出錯）
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(emptyList()))
+        )
+        val h = buildHarness(repo)
+        h.doSearch("zzzz不存在的字串")
+
+        val st = h.vm.state.value
+        assertNull(st.error)
+        assertEquals(emptyList<VideoResult>(), st.results)
+        assertTrue(st.searched)
+    }
+
+    /**
+     * 空結果回饋只由 UI 空狀態承載，ViewModel 不再發「查無結果」snackbar
+     * （避免短暫浮動與持續顯示的文字同時出現）。
+     */
+    @Test
+    fun `搜尋無結果時不發出 messages 由空狀態承載回饋`() {
+        val repo = FakeVideoRepository(
+            firstPageResult = Result.success(VideoSearchPage(emptyList()))
+        )
+        val h = buildHarness(repo)
+        h.doSearch("這是不存在關鍵字zzz")
+
+        // 搜尋本身成功：狀態正確進入「已搜尋但無結果」，空狀態據此顯示「查無結果」
+        assertTrue(h.vm.state.value.searched)
+        assertTrue(h.vm.state.value.results.isEmpty())
+        assertNull(h.vm.state.value.error)
+        assertTrue(!h.vm.state.value.isLoading)
+        // 不再發出重複的 snackbar
+        assertEquals(emptyList<String>(), h.messages)
     }
 
     @Test
@@ -315,9 +459,13 @@ class SearchViewModelTest {
 
         assertEquals(listOf(v1), h.vm.state.value.results) // 既有結果不破壞
         assertEquals("TOKEN_A", h.vm.state.value.nextPageToken) // 保留供重試
-        assertEquals("token expired", h.vm.state.value.error)
         assertTrue(!h.vm.state.value.isLoadingMore)
-        assertEquals("載入更多失敗：token expired", h.messages.last())
+        // 刻意不寫入 error：錯誤狀態會取代結果列表，而此時既有結果仍可閱讀。
+        // （此為本次錯誤狀態上線後的語意變更：過去 error = "token expired" 但無 UI 消費。）
+        assertNull(h.vm.state.value.error)
+        // snackbar 仍回報，且不得外顯原始例外訊息
+        assertEquals("載入更多失敗：${SearchError.UNKNOWN.message}", h.messages.last())
+        assertTrue(!h.messages.last().contains("token expired"))
     }
 
     @Test
