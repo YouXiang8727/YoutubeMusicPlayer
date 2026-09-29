@@ -76,6 +76,8 @@ fun PlaylistListScreen(
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf<Playlist?>(null) }
+    // 待刪除的播放清單（非 null 時顯示刪除確認 AlertDialog）
+    var pendingDelete by remember { mutableStateOf<Playlist?>(null) }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -134,7 +136,7 @@ fun PlaylistListScreen(
                             playlist = playlist,
                             onClick = { onOpenPlaylist(playlist.id, playlist.name) },
                             onRename = { showRenameDialog = playlist },
-                            onDelete = { onIntent(PlaylistListIntent.Delete(playlist.id)) },
+                            onDelete = { pendingDelete = playlist },
                             onExport = { onExport(playlist.id) }
                         )
                     }
@@ -165,6 +167,19 @@ fun PlaylistListScreen(
                     showRenameDialog = null
                 },
                 onDismiss = { showRenameDialog = null }
+            )
+        }
+
+        // 刪除播放清單確認 Dialog（不可逆，且會連帶刪除歌單內所有曲目 → 需二次確認）
+        // 下拉選單「刪除」與卡片長按（onLongClick）走同一條路徑
+        pendingDelete?.let { playlist ->
+            DeletePlaylistDialog(
+                playlist = playlist,
+                onConfirm = {
+                    onIntent(PlaylistListIntent.Delete(playlist.id))
+                    pendingDelete = null
+                },
+                onDismiss = { pendingDelete = null }
             )
         }
 
@@ -287,6 +302,49 @@ private fun RenamePlaylistDialog(
                 onClick = { onConfirm(trimmed); onDismiss() },
                 enabled = name.isNotBlank() && trimmed != currentName && !nameExists
             ) { Text("確認") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+/**
+ * 刪除播放清單確認彈窗：刪除不可逆，且會連帶刪除歌單內的**所有曲目**，
+ * 因此後果必須寫清楚，不能只停在「確定要刪除嗎」。
+ *
+ * 歌單名稱是使用者任意輸入（可能極長），故名稱與後果分成兩個 Text：
+ * 名稱自行截斷（maxLines ＋ Ellipsis），後果句永不被截掉。
+ */
+@Composable
+private fun DeletePlaylistDialog(
+    playlist: Playlist,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("刪除播放清單？") },
+        text = {
+            Column {
+                Text(
+                    text = "「${playlist.name}」",
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "其中的全部曲目也會一併刪除，且無法復原。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("刪除", color = MaterialTheme.colorScheme.error)
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
@@ -429,6 +487,69 @@ fun PlaylistListRoute(
 /** 過濾檔案名稱非法字元（Windows/Android 通用），空白名稱兜底為 playlist。 */
 private fun sanitizeFileName(name: String): String =
     name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifEmpty { "playlist" }
+
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "DeletePlaylistDialog - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "DeletePlaylistDialog - Light"
+)
+@Composable
+private fun DeletePlaylistDialogPreview() {
+    MyMediaPlayerTheme {
+        DeletePlaylistDialog(
+            playlist = Playlist(id = 1, name = "我的最愛", createdAt = 1690000000000L),
+            onConfirm = {},
+            onDismiss = {}
+        )
+    }
+}
+
+// 歌單名稱為使用者任意輸入，可能極長 → 確認彈窗最易破版的情境，固定做視覺回歸
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "DeletePlaylistDialog - LongName - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "DeletePlaylistDialog - LongName - Light"
+)
+@Composable
+private fun DeletePlaylistDialogLongNamePreview() {
+    MyMediaPlayerTheme {
+        DeletePlaylistDialog(
+            playlist = Playlist(
+                id = 2,
+                name = "2026 年 9 月每週複習清單（鋼琴＋樂理＋流行鋼琴編曲示範與示範曲以及⋯⋯）",
+                createdAt = 1690100000000L
+            ),
+            onConfirm = {},
+            onDismiss = {}
+        )
+    }
+}
 
 @Preview(
     showBackground = true,
