@@ -26,20 +26,43 @@ data class PlaylistDetailUiState(
     val playlistId: Long = 0L,
     val playlistName: String = "",
     val items: List<PlaylistItem> = emptyList(),
+    /** 歌名關鍵字篩選字串；空／空白代表不篩選。 */
+    val query: String = "",
     val isLoading: Boolean = true,
     val failedCount: Int = 0
-)
+) {
+    /**
+     * 依 [query] 過濾後的清單；query 空白時為全部（維持原順序）。
+     *
+     * **只比對歌名**（[PlaylistItem.title]）：不比頻道、不比時長、不比播放失敗狀態。
+     * 比對規則 = `title.contains(query.trim(), ignoreCase = true)`：
+     * - `trim()` 讓使用者手打的前後空白不影響結果；
+     * - `ignoreCase` 讓中文以外（英文歌名／頻道式標題）的大小寫不影響結果。
+     *
+     * 刻意做成**純函式派生屬性**（不進 constructor、不存進 StateFlow）：
+     * 篩選結果可由 [items] 與 [query] 完全推導，無額外真實來源，
+     * 因此單元測試直接斷言此屬性即可，不需 coroutine / dispatcher。
+     */
+    val visibleItems: List<PlaylistItem>
+        get() = if (query.isBlank()) {
+            items
+        } else {
+            items.filter { it.title.contains(query.trim(), ignoreCase = true) }
+        }
+}
 
 sealed interface PlaylistDetailIntent {
     data class Remove(val videoId: String) : PlaylistDetailIntent
     data class Play(val item: PlaylistItem) : PlaylistDetailIntent
     data object ClearAll : PlaylistDetailIntent
     data object ShufflePlay : PlaylistDetailIntent
+    /** 更新歌名關鍵字篩選字串（由輸入框每次變動發出）。 */
+    data class SetQuery(val value: String) : PlaylistDetailIntent
 }
 
 @HiltViewModel
 class PlaylistDetailViewModel @Inject constructor(
-    savedStateHandle: SavedStateHandle,
+    private val savedStateHandle: SavedStateHandle,
     observePlaylistItems: ObservePlaylistItemsUseCase,
     private val removeFromPlaylist: RemoveFromPlaylistUseCase,
     private val clearPlaylist: ClearPlaylistUseCase,
@@ -55,7 +78,9 @@ class PlaylistDetailViewModel @Inject constructor(
     private val _state = MutableStateFlow(
         PlaylistDetailUiState(
             playlistId = playlistId,
-            playlistName = playlistName
+            playlistName = playlistName,
+            // 旋轉／重建 ViewModel 後還原先前的篩選字串
+            query = savedStateHandle.get<String>(KEY_QUERY).orEmpty()
         )
     )
     val state: StateFlow<PlaylistDetailUiState> = _state.asStateFlow()
@@ -81,6 +106,15 @@ class PlaylistDetailViewModel @Inject constructor(
 
     fun onIntent(intent: PlaylistDetailIntent) {
         when (intent) {
+            is PlaylistDetailIntent.SetQuery -> {
+                // 純狀態寫入，不涉及 IO，因此刻意不 launch coroutine。
+                // 寫入 SavedStateHandle 的是**原始值**（不 trim）：
+                // trim 只在 visibleItems 比對與文案顯示時處理，避免把使用者
+                // 正在輸入的字串（含尾端空白）改寫成另一個值而與畫面游標脫節。
+                savedStateHandle[KEY_QUERY] = intent.value
+                _state.value = _state.value.copy(query = intent.value)
+            }
+
             is PlaylistDetailIntent.Remove -> viewModelScope.launch {
                 removeFromPlaylist(playlistId, intent.videoId)
                 _messages.tryEmit("已從播放清單移除")
@@ -108,13 +142,45 @@ class PlaylistDetailViewModel @Inject constructor(
             }
 
             PlaylistDetailIntent.ShufflePlay -> viewModelScope.launch {
-                shufflePlayPlaylist(playlistId)
-                    ?.let { item ->
-                        playerController.play(item.videoId, item.title)
-                        _messages.tryEmit("隨機播放：${item.title}")
+                val current = _state.value
+                if (current.query.isNotBlank()) {
+                    // 篩選生效時**以可見項目作為播放佇列**，並從其中隨機一比起播。
+                    // 理由是語意要誠實：按鈕標示「隨機播放（N 首符合篩選）」，
+                    // 畫面上看到的就是那 N 首，實際播放的佇列也必須正好是那 N 首，
+                    // 三者（數字／畫面／佇列長度）才一致。
+                    //
+                    // ⚠️ 不可用 playerController.play(videoId, title)：那條路徑會發
+                    // ACTION_PLAY 給 MusicService，PlaybackQueueBuilder 會把
+                    // 「整份歌單」當成佇列、只從該曲起播 → 按鈕寫 3 首但佇列 10 首，
+                    // 正是要避免的數字／行為不一致。
+                    val visible = current.visibleItems
+                    if (visible.isEmpty()) {
+                        _messages.tryEmit("清單為空，無法隨機播放")
+                    } else {
+                        val startIndex = visible.indices.random()
+                        playerController.playQueue(
+                            items = visible.map {
+                                PlayQueueItem(videoId = it.videoId, title = it.title)
+                            },
+                            startIndex = startIndex
+                        )
+                        _messages.tryEmit("隨機播放：${visible[startIndex].title}")
                     }
-                    ?: _messages.tryEmit("清單為空，無法隨機播放")
+                } else {
+                    // 未篩選：維持既有路徑（整份歌單為佇列、隨機起播位置），不動。
+                    shufflePlayPlaylist(playlistId)
+                        ?.let { item ->
+                            playerController.play(item.videoId, item.title)
+                            _messages.tryEmit("隨機播放：${item.title}")
+                        }
+                        ?: _messages.tryEmit("清單為空，無法隨機播放")
+                }
             }
         }
+    }
+
+    private companion object {
+        /** [androidx.lifecycle.SavedStateHandle] 中存放篩選字串的 key。 */
+        const val KEY_QUERY = "playlistQuery"
     }
 }

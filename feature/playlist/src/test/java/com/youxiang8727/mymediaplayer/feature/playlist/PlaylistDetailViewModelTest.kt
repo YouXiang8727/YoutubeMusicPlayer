@@ -70,7 +70,9 @@ class PlaylistDetailViewModelTest {
 
     /** ViewModel 只依賴 interface，此 fake 只供應觀察 flow；其餘操作不觸發。 */
     private class FakePlaylistRepository(
-        val itemsFlow: Flow<List<PlaylistItem>> = emptyFlow()
+        val itemsFlow: Flow<List<PlaylistItem>> = emptyFlow(),
+        /** [getRandomItem] 的回傳值；預設 null 代表「抽不到」＝歌單為空。 */
+        private val randomItem: PlaylistItem? = null
     ) : PlaylistRepository {
         override fun observeAllPlaylists(): Flow<List<Playlist>> = emptyFlow()
         override suspend fun createPlaylist(name: String): Long = 1L
@@ -80,7 +82,7 @@ class PlaylistDetailViewModelTest {
         override suspend fun addItem(playlistId: Long, item: PlaylistItem) {}
         override suspend fun removeItem(playlistId: Long, videoId: String) {}
         override suspend fun clearPlaylist(playlistId: Long) {}
-        override suspend fun getRandomItem(playlistId: Long): PlaylistItem? = null
+        override suspend fun getRandomItem(playlistId: Long): PlaylistItem? = randomItem
         override suspend fun createPlaylistWithItems(name: String, items: List<PlaylistItem>): Long = 1L
         override suspend fun markStreamFailed(videoId: String, failedAt: Long) {}
         override suspend fun clearStreamFailed(videoId: String) {}
@@ -131,10 +133,11 @@ class PlaylistDetailViewModelTest {
     private fun buildHarness(
         repo: FakePlaylistRepository,
         playlistId: Long = 1L,
-        player: FakePlayerController = FakePlayerController()
+        player: FakePlayerController = FakePlayerController(),
+        savedStateHandle: SavedStateHandle = SavedStateHandle(mapOf("playlistId" to playlistId))
     ): Harness {
         val vm = PlaylistDetailViewModel(
-            savedStateHandle = SavedStateHandle(mapOf("playlistId" to playlistId)),
+            savedStateHandle = savedStateHandle,
             observePlaylistItems = ObservePlaylistItemsUseCase(repo),
             removeFromPlaylist = RemoveFromPlaylistUseCase(repo),
             clearPlaylist = ClearPlaylistUseCase(repo),
@@ -214,5 +217,189 @@ class PlaylistDetailViewModelTest {
 
         assertEquals(3, h.vm.state.value.items.size)
         assertEquals(0, h.vm.state.value.failedCount)
+    }
+
+    // ── 以下為歌名關鍵字篩選（query / visibleItems）──────────────────────────
+    // visibleItems 是純函式派生屬性，故直接斷言 UiState，不需 coroutine。
+
+    @Test
+    fun `query 為空字串時 visibleItems 等於 items 且順序不變`() {
+        val items = listOf(v1, v2, v3)
+        val state = PlaylistDetailUiState(items = items, query = "")
+
+        assertEquals(items, state.visibleItems)
+    }
+
+    @Test
+    fun `query 為純空白時 visibleItems 等於 items（視為不篩選）`() {
+        val items = listOf(v1, v2, v3)
+        val state = PlaylistDetailUiState(items = items, query = "   ")
+
+        assertEquals(items, state.visibleItems)
+    }
+
+    @Test
+    fun `query 命中者保留、未命中者排除且維持原順序`() {
+        val items = listOf(v1, v2, v3) // 晴天 / 夜曲 / 七里香
+        val state = PlaylistDetailUiState(items = items, query = "夜")
+
+        assertEquals(listOf(v2), state.visibleItems)
+    }
+
+    @Test
+    fun `query 比對大小寫不敏感`() {
+        // query 全小寫 jay，標題是「Jay Chou ...」大寫開頭
+        val jayLive = v2.copy(title = "Jay Chou 演唱會現場")
+        val items = listOf(v1, jayLive, v3)
+        val state = PlaylistDetailUiState(items = items, query = "jay")
+
+        assertEquals(listOf(jayLive), state.visibleItems)
+    }
+
+    @Test
+    fun `query 前後空白被 trim 後才比對`() {
+        val items = listOf(v1, v2, v3) // 晴天 / 夜曲 / 七里香
+        val state = PlaylistDetailUiState(items = items, query = "  晴天  ")
+
+        assertEquals(listOf(v1), state.visibleItems)
+    }
+
+    @Test
+    fun `query 無命中時 visibleItems 為空`() {
+        val items = listOf(v1, v2, v3)
+        val state = PlaylistDetailUiState(items = items, query = "不存在")
+
+        assertTrue(state.visibleItems.isEmpty())
+    }
+
+    @Test
+    fun `query 只比對歌名不比頻道`() {
+        // v1/v3 的 channel 都是 Jay Chou，但歌名不含 jay → 應全被排除
+        val items = listOf(v1, v2, v3)
+        val state = PlaylistDetailUiState(items = items, query = "jay")
+
+        assertTrue(state.visibleItems.isEmpty())
+    }
+
+    @Test
+    fun `SetQuery 更新 state query 並同步寫入 SavedStateHandle`() {
+        val handle = SavedStateHandle(mapOf("playlistId" to 1L))
+        val h = buildHarness(FakePlaylistRepository(), savedStateHandle = handle)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        h.vm.onIntent(PlaylistDetailIntent.SetQuery("  Jay "))
+
+        // 存的是原始值（不 trim）：畫面上的字串與輸入框內容必須一致
+        assertEquals("  Jay ", h.vm.state.value.query)
+        assertEquals("  Jay ", handle.get<String>("playlistQuery"))
+    }
+
+    @Test
+    fun `SetQuery 空白時 visibleItems 恢復全部項目`() {
+        val h = buildHarness(FakePlaylistRepository(flowOf(listOf(v1, v2, v3))))
+        dispatcher.scheduler.advanceUntilIdle()
+        h.vm.onIntent(PlaylistDetailIntent.SetQuery("晴天"))
+        assertEquals(listOf(v1), h.vm.state.value.visibleItems)
+
+        h.vm.onIntent(PlaylistDetailIntent.SetQuery(""))
+
+        assertEquals("", h.vm.state.value.query)
+        assertEquals(listOf(v1, v2, v3), h.vm.state.value.visibleItems)
+    }
+
+    @Test
+    fun `建構時從 SavedStateHandle 還原 query`() {
+        val handle = SavedStateHandle(
+            mapOf("playlistId" to 1L, "playlistQuery" to "夜曲")
+        )
+        val h = buildHarness(FakePlaylistRepository(), savedStateHandle = handle)
+
+        assertEquals("夜曲", h.vm.state.value.query)
+    }
+
+    @Test
+    fun `ShufflePlay 於篩選生效時以可見項目為播放佇列並從其中隨機起播`() {
+        // 只有 v2 的歌名命中「夜曲」；Fake 的 getRandomItem 恆回 null，
+        // 故若誤走未篩選路徑（UseCase）會得到「清單為空」而非播放。
+        val h = buildHarness(FakePlaylistRepository(flowOf(listOf(v1, v2, v3))))
+        dispatcher.scheduler.advanceUntilIdle()
+        h.vm.onIntent(PlaylistDetailIntent.SetQuery("夜曲"))
+
+        val expectedVisible = h.vm.state.value.visibleItems
+        assertEquals(listOf(v2), expectedVisible)
+
+        h.vm.onIntent(PlaylistDetailIntent.ShufflePlay)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        // 佇列**恰為**可見項目（順序與 visibleItems 一致）
+        assertEquals(1, h.player.playQueueCalls.size)
+        val (queueItems, startIndex) = h.player.playQueueCalls.single()
+        assertEquals(queueOf(v2), queueItems)
+        // 只斷言範圍：startIndex 是隨機的，斷言固定值會 flaky
+        assertTrue("startIndex=$startIndex 應落在 0..size-1", startIndex in expectedVisible.indices)
+        // 不可走 Room play 路徑（那會讓 MusicService 以整份歌單為佇列，數字說謊）
+        assertTrue(h.player.playCalls.isEmpty())
+        assertEquals("隨機播放：夜曲", h.messages.last())
+    }
+
+    @Test
+    fun `ShufflePlay 於篩選生效時佇列只含全部可見項目而非整份歌單`() {
+        // query「Jay」命中 v1/v3 的**頻道**而非歌名 → 空；但「夜」只命中 v2。
+        // 此處用能命中多首的 query 驗證佇列長度 == 可見數量（而非整份歌單 3 首）。
+        val night1 = v1.copy(videoId = "n1", title = "夜曲 Live")
+        val night2 = v2.copy(videoId = "n2", title = "夜曲 鋼琴版")
+        val h = buildHarness(FakePlaylistRepository(flowOf(listOf(night1, v2, night2))))
+        dispatcher.scheduler.advanceUntilIdle()
+        h.vm.onIntent(PlaylistDetailIntent.SetQuery("夜曲"))
+
+        val expectedVisible = h.vm.state.value.visibleItems
+        assertEquals(3, expectedVisible.size)
+
+        h.vm.onIntent(PlaylistDetailIntent.ShufflePlay)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val (queueItems, startIndex) = h.player.playQueueCalls.single()
+        assertEquals(queueOf(night1, v2, night2), queueItems)
+        assertEquals(expectedVisible.size, queueItems.size)
+        assertTrue(startIndex in expectedVisible.indices)
+        assertEquals(
+            "隨機播放：${expectedVisible[startIndex].title}",
+            h.messages.last()
+        )
+    }
+
+    @Test
+    fun `ShufflePlay 於篩選無結果時不播放且不建佇列並提示清單為空`() {
+        val h = buildHarness(FakePlaylistRepository(flowOf(listOf(v1, v2, v3))))
+        dispatcher.scheduler.advanceUntilIdle()
+        h.vm.onIntent(PlaylistDetailIntent.SetQuery("不存在"))
+
+        h.vm.onIntent(PlaylistDetailIntent.ShufflePlay)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(h.player.playQueueCalls.isEmpty())
+        assertTrue(h.player.playCalls.isEmpty())
+        assertEquals("清單為空，無法隨機播放", h.messages.last())
+    }
+
+    @Test
+    fun `ShufflePlay 未篩選時仍走 play 路徑且不建 playQueue 佇列`() {
+        // 回歸保護：防止有人「順手統一」兩條路徑，把未篩選也改成 playQueue。
+        // 未篩選的既有語意是「整份歌單為佇列、隨機起播位置」，由 UseCase + play 達成。
+        val repo = FakePlaylistRepository(
+            itemsFlow = flowOf(listOf(v1, v2, v3)),
+            randomItem = v3
+        )
+        val h = buildHarness(repo)
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("", h.vm.state.value.query)
+
+        h.vm.onIntent(PlaylistDetailIntent.ShufflePlay)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(1, h.player.playCalls.size)
+        assertEquals("id3" to "七里香", h.player.playCalls.single())
+        assertTrue(h.player.playQueueCalls.isEmpty())
+        assertEquals("隨機播放：七里香", h.messages.last())
     }
 }

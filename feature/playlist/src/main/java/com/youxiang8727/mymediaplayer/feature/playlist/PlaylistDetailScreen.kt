@@ -18,12 +18,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -80,6 +82,33 @@ fun PlaylistDetailScreen(
                 }
             }
 
+            // 歌名關鍵字篩選欄位（與「隨機播放」「全部清除」同一個條件式版面風格：
+            // 清單空時沒有東西可篩，不掛這個框）
+            if (state.items.isNotEmpty()) {
+                OutlinedTextField(
+                    value = state.query,
+                    onValueChange = { onIntent(PlaylistDetailIntent.SetQuery(it)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text("搜尋歌名") },
+                    leadingIcon = {
+                        Icon(Icons.Filled.Search, contentDescription = null)
+                    },
+                    trailingIcon = if (state.query.isNotEmpty()) {
+                        {
+                            IconButton(
+                                onClick = { onIntent(PlaylistDetailIntent.SetQuery("")) }
+                            ) {
+                                Icon(Icons.Filled.Close, contentDescription = "清除搜尋")
+                            }
+                        }
+                    } else {
+                        null
+                    }
+                )
+                Spacer(Modifier.height(12.dp))
+            }
+
             // 隨機播放按鈕
             if (state.items.isNotEmpty()) {
                 FilledTonalButton(
@@ -92,7 +121,13 @@ fun PlaylistDetailScreen(
                         modifier = Modifier.size(20.dp)
                     )
                     Text(
-                        "隨機播放（${state.items.size} 首）",
+                        // 篩選生效時必須顯示「篩選後」的數量：ViewModel 也只會從
+                        // visibleItems 抽，兩邊數字才一致（否則按鈕在說謊）。
+                        text = if (state.query.isBlank()) {
+                            "隨機播放（${state.items.size} 首）"
+                        } else {
+                            "隨機播放（${state.visibleItems.size} 首符合篩選）"
+                        },
                         modifier = Modifier.padding(start = 8.dp)
                     )
                 }
@@ -116,11 +151,31 @@ fun PlaylistDetailScreen(
                     )
                 }
 
+                // 有歌但篩不到：與「清單是空的」是不同的空狀態，必須區分，
+                // 否則使用者會誤以為歌被刪了。附清除搜尋的出路。
+                state.query.isNotBlank() && state.visibleItems.isEmpty() -> Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "沒有符合「${state.query.trim()}」的歌曲",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TextButton(onClick = { onIntent(PlaylistDetailIntent.SetQuery("")) }) {
+                            Text("清除搜尋")
+                        }
+                    }
+                }
+
                 else -> LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
                     // 播放失敗提示（清單頂部空白處）
+                    // 刻意仍用 failedCount（全清單口徑），不因篩選而改為 visibleItems 的口徑：
+                    // 它是「這份歌單曾有 N 首出問題」的整體健康提示，不是篩選結果的一部分。
                     if (state.failedCount > 0) {
                         item(key = "_failed_banner") {
                             Text(
@@ -133,7 +188,7 @@ fun PlaylistDetailScreen(
                             )
                         }
                     }
-                    items(state.items, key = { it.videoId }) { item ->
+                    items(state.visibleItems, key = { it.videoId }) { item ->
                         PlaylistDetailCard(
                             item = item,
                             onClick = { onIntent(PlaylistDetailIntent.Play(item)) }
@@ -289,6 +344,126 @@ private fun PlaylistDetailScreenItemsPreview() {
                 playlistId = 1,
                 playlistName = "我的最愛",
                 isLoading = false,
+                items = listOf(
+                    PlaylistItem(
+                        videoId = "dQw4w9WgXcQ",
+                        title = "晴天",
+                        thumbnailUrl = "",
+                        channel = "Jay Chou",
+                        duration = "4:30",
+                        playlistId = 1
+                    ),
+                    PlaylistItem(
+                        videoId = "abc12345678",
+                        title = "夜曲 Live",
+                        thumbnailUrl = "",
+                        channel = "Official",
+                        duration = null,
+                        playlistId = 1
+                    )
+                )
+            ),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {}
+        ) {
+            // onBack
+        }
+    }
+}
+
+/**
+ * 篩選生效：query 刻意帶前後空白且大小寫混雜（" Jay "），
+ * 用以在 Preview 上直接驗證 trim ＋ ignoreCase 是否真的只命中歌名。
+ */
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistDetailScreen - Query Filtered - Dark"
+)
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistDetailScreen - Query Filtered - Light"
+)
+@Composable
+private fun PlaylistDetailScreenQueryFilteredPreview() {
+    MyMediaPlayerTheme {
+        PlaylistDetailScreen(
+            state = PlaylistDetailUiState(
+                playlistId = 1,
+                playlistName = "我的最愛",
+                isLoading = false,
+                query = " Jay ",
+                items = listOf(
+                    PlaylistItem(
+                        videoId = "dQw4w9WgXcQ",
+                        title = "晴天",
+                        thumbnailUrl = "",
+                        channel = "Jay Chou",
+                        duration = "4:30",
+                        playlistId = 1
+                    ),
+                    PlaylistItem(
+                        videoId = "abc12345678",
+                        title = "Jay Chou 演唱會現場",
+                        thumbnailUrl = "",
+                        channel = "Official",
+                        duration = "5:12",
+                        playlistId = 1
+                    ),
+                    PlaylistItem(
+                        videoId = "xyz98765432",
+                        title = "青花瓷",
+                        thumbnailUrl = "",
+                        channel = "Jay Chou",
+                        duration = "3:58",
+                        playlistId = 1
+                    ),
+                    PlaylistItem(
+                        videoId = "def45678901",
+                        title = "稻香",
+                        thumbnailUrl = "",
+                        channel = "Jay Chou",
+                        duration = "3:42",
+                        playlistId = 1
+                    )
+                )
+            ),
+            snackbarHostState = remember { SnackbarHostState() },
+            onIntent = {}
+        ) {
+            // onBack
+        }
+    }
+}
+
+/** 篩選無結果的第三種空狀態（含清除搜尋按鈕）。 */
+@Preview(
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO,
+    locale = "zh_TW",
+    fontScale = 1.0f,
+    device = Devices.PIXEL_7_PRO,
+    group = "feature-playlist",
+    name = "PlaylistDetailScreen - Query No Match - Light"
+)
+@Composable
+private fun PlaylistDetailScreenQueryNoMatchPreview() {
+    MyMediaPlayerTheme {
+        PlaylistDetailScreen(
+            state = PlaylistDetailUiState(
+                playlistId = 1,
+                playlistName = "我的最愛",
+                isLoading = false,
+                query = " 周杰倫 ",
                 items = listOf(
                     PlaylistItem(
                         videoId = "dQw4w9WgXcQ",
